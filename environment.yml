@@ -1,0 +1,16 @@
+name: adCNN
+channels:
+  - defaults
+  - pytorch
+dependencies:
+  - python=3.8
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - pillow
+  - pytorch
+  - torchvision
+  - pip
+  - pip:
+      - nibabel
