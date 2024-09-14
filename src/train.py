@@ -42,6 +42,22 @@ for epoch in range(num_epochs):
     epoch_loss = running_loss / len(train_loader.dataset)
     print(f'Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss:.4f}')
 
+    # validation loop
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images = images.to(device)
+            labels = labels.to(device).unsqueeze(1)
+            outputs = model(images)
+            predicted = (outputs > 0.5).float()
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    accuracy = 100 * correct / total
+    print(f'Validation Accuracy: {accuracy:.2f}%')
+
 if not os.path.exists('models'):
     os.makedirs('models')
 torch.save(model.state_dict(), 'models/adCNN.pth')
