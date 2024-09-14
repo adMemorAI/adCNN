@@ -4,6 +4,7 @@ channels:
   - pytorch
 dependencies:
   - python=3.8
+  - tqdm
   - numpy
   - pandas
   - matplotlib

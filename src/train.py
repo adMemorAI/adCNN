@@ -2,31 +2,38 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from dataset import MRIDataset
+from tqdm import tqdm
 from model import SimpleCNN
-from torchvision import transforms
 import os
 
 from config import device, transform
+from loader import DatasetLoader
+from datasets.oasis_kaggle import OASISKaggle
 
-train_dir = 'data/train'
-test_dir = 'data/test'
 
-train_dataset = MRIDataset(train_dir, transform=transform)
-test_dataset = MRIDataset(test_dir, transform=transform)
+datasets_info = [
+    (OASISKaggle, {"name": "oasis_kaggle", "transform": transform}),
+]
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+loader = DatasetLoader(datasets_info, test_size=0.2, random_seed=42, batch_size=32)
+
+train_loader, test_loader = loader.load_datasets()
 
 model = SimpleCNN().to(device)
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+print(f'Using device: {device}')
+print(f'Model on device: {next(model.parameters()).device}')
+
 num_epochs = 10
 
 for epoch in range(num_epochs):
+    print(f'Epoch {epoch+1}/{num_epochs}')
     model.train()
     running_loss = 0.00
+
+    train_loader_tqdm = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}', leave=False)
 
     for images, labels in train_loader:
         images = images.to(device)
@@ -34,11 +41,17 @@ for epoch in range(num_epochs):
 
         optimizer.zero_grad()
 
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item() * images.size(0)
-    
+
+    epoch_loss = running_loss / len(train_loader.dataset)
+    print(f'Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss:.4f}')
+
     epoch_loss = running_loss / len(train_loader.dataset)
     print(f'Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss:.4f}')
 
