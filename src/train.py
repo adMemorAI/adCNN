@@ -8,7 +8,7 @@ import os
 
 from config import device, transform
 from loader import DatasetLoader
-from datasets.oasis_kaggle import OASISKaggle
+from dsets.oasis_kaggle import OASISKaggle
 
 
 datasets_info = [
