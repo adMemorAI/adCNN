@@ -20,6 +20,6 @@ class SimpleCNN(nn.Module):
         x = self.pool(F.relu(self.conv2(x))) # output: [batch_size, 64, 56, 56]
         x = x.view(-1, 64 * 56 * 56) # flatten
         x = F.relu(self.fc1(x))
-        x = torch.sigmoid(self.fc2(x)) # binary classification
+        x = self.fc2(x)
         return x
         

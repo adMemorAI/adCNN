@@ -4,6 +4,7 @@ channels:
   - pytorch
 dependencies:
   - python=3.8
+  - cudatoolkit
   - tqdm
   - numpy
   - pandas
@@ -12,6 +13,9 @@ dependencies:
   - pillow
   - pytorch
   - torchvision
+  - torchmetrics
+  - tensorboard
+  - rich
   - pip
   - pip:
       - nibabel
