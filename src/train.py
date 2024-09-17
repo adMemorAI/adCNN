@@ -158,10 +158,13 @@ for epoch in range(num_epochs):
 
     console.print(table)
 
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+models_path = os.path.join(project_root, 'models')
 # Save the model
-if not os.path.exists('models'):
-    os.makedirs('models')
-torch.save(model.state_dict(), 'models/adCNN.pth')
+if not os.path.exists(models_path):
+    os.makedirs(models_path)
+save_to = os.path.join(models_path = os.path.join(models_path, 'adCNN.pth'))
+torch.save(model.state_dict(), save_to)
 logger.info('Model saved to models/adCNN.pth')
 
 writer.close()
