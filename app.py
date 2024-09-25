@@ -5,7 +5,7 @@ from model import SimpleCNN
 from config import device, transform
 from pathlib import Path
 
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent
 model_dir = os.path.join(project_root, "models/adCNN.pth")
 
 model = SimpleCNN()
