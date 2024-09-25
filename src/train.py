@@ -33,11 +33,8 @@ logger = logging.getLogger("rich")
 # Initialize TensorBoard writer
 writer = SummaryWriter(log_dir='runs/adCNN_experiment')
 
-datasets_info = [
-    (OASISKaggle, {"name": "oasis_kaggle"}),
-]
-
-loader = DatasetLoader(datasets_info, test_size=0.2, random_seed=42, batch_size=64)
+datasets = (OASISKaggle, )
+loader = DatasetLoader(datasets, test_size=0.2, random_seed=42, batch_size=64)
 train_loader, test_loader = loader.load_datasets()
 
 # Perform Label Verification Before Training
@@ -163,7 +160,7 @@ models_path = os.path.join(project_root, 'models')
 # Save the model
 if not os.path.exists(models_path):
     os.makedirs(models_path)
-save_to = os.path.join(models_path = os.path.join(models_path, 'adCNN.pth'))
+save_to = os.path.join(models_path, 'adCNN.pth')
 torch.save(model.state_dict(), save_to)
 logger.info('Model saved to models/adCNN.pth')
 
