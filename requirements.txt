@@ -1,0 +1,13 @@
+# generated for huggingface
+tqdm
+numpy
+pandas
+matplotlib
+scikit-learn
+pillow
+torch
+torchvision
+torchmetrics
+tensorboard
+rich
+os
