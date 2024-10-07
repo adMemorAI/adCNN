@@ -1,32 +1,33 @@
 import torch
 from PIL import Image
-import sys
 from model import SimpleCNN
 from config import device, transform
-from pathlib import Path
+import gradio as gr
 from huggingface_hub import hf_hub_download
+
+# -----------------------------
+# 1. Load the Model
+# -----------------------------
 
 # Download the model file from the Hugging Face Model Hub
 model_dir = hf_hub_download(repo_id="diejor/adCNN-simple", filename="adCNN.pth")
 
 model = SimpleCNN()
-model.load_state_dict(torch.load(model_dir), map_location=device)
+model.load_state_dict(torch.load(model_dir, map_location=device))
 model.to(device)
 model.eval()
 
 # -----------------------------
-# 4. Define the Prediction Function
+# 2. Define the Prediction Function
 # -----------------------------
 
 def predict_dementia(image):
     try:
         # Apply preprocessing
-        input_tensor = preprocess(image)
+        input_tensor = transform(image)
         input_batch = input_tensor.unsqueeze(0)  # Create a mini-batch as expected by the model
 
-        # Move the input and model to CPU (or GPU if available)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model.to(device)
+        # Move the input and model to device (CPU or GPU)
         input_batch = input_batch.to(device)
 
         with torch.no_grad():
@@ -43,7 +44,7 @@ def predict_dementia(image):
         return f"Error in processing image: {e}"
 
 # -----------------------------
-# 5. Create the Gradio Interface
+# 3. Create the Gradio Interface
 # -----------------------------
 
 iface = gr.Interface(
@@ -58,9 +59,8 @@ iface = gr.Interface(
 )
 
 # -----------------------------
-# 6. Launch the Interface
+# 4. Launch the Interface
 # -----------------------------
 
 if __name__ == "__main__":
     iface.launch()
-
