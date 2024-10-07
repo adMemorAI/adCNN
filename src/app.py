@@ -49,8 +49,8 @@ def predict_dementia(image):
 
 iface = gr.Interface(
     fn=predict_dementia,  # The prediction function
-    inputs=gr.inputs.Image(type="pil", label="Upload MRI Slice (PNG)"),  # Input component
-    outputs=gr.outputs.Textbox(label="Prediction"),  # Output component
+    inputs=gr.Image(type="pil", label="Upload MRI Slice (PNG)"),  # Input component
+    outputs=gr.Textbox(label="Prediction"),  # Output component
     title="Dementia Detection from MRI Slices",
     description="Upload an MRI slice as a PNG image, and the model will predict whether it shows signs of dementia.",
     examples=[
