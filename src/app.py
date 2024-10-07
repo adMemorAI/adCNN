@@ -5,8 +5,9 @@ from model import SimpleCNN
 from config import device, transform
 from pathlib import Path
 
-project_root = Path(__file__).parent.parent
-model_dir = os.path.join(project_root, "models/adCNN.pth")
+
+# Download the model file from the Hugging Face Model Hub
+model_dir = hf_hub_download(repo_id="diejor/adCNN-simple", filename="adCNN.pth")
 
 model = SimpleCNN()
 model.load_state_dict(torch.load(model_dir), map_location=device)
