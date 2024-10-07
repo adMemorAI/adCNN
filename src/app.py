@@ -4,7 +4,7 @@ import sys
 from model import SimpleCNN
 from config import device, transform
 from pathlib import Path
-
+from huggingface_hub import hf_hub_download
 
 # Download the model file from the Hugging Face Model Hub
 model_dir = hf_hub_download(repo_id="diejor/adCNN-simple", filename="adCNN.pth")
