@@ -1,25 +1,27 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torchvision.models import resnet18, ResNet18_Weights
 
-class SimpleCNN(nn.Module):
+class ResAD(nn.Module):
     def __init__(self):
-        super(SimpleCNN, self).__init__()
-
-        # convolution
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        
-        # fully connected
-        self.fc1 = nn.Linear(64 * 56 * 56, 128)
-        self.fc2 = nn.Linear(128, 1) # binary classification
+        super(SCNN4, self).__init__()
+        # Load the pre-trained ResNet18 model with the new weights parameter
+        self.base_model = resnet18(weights=ResNet18_Weights.DEFAULT)
+        # Modify the first convolutional layer to accept 1-channel images
+        self.base_model.conv1 = nn.Conv2d(
+            in_channels=1,
+            out_channels=64,
+            kernel_size=7,
+            stride=2,
+            padding=3,
+            bias=False
+        )
+        # Initialize the new conv1 layer
+        nn.init.kaiming_normal_(self.base_model.conv1.weight, mode='fan_out', nonlinearity='relu')
+        # Modify the output layer for binary classification
+        num_ftrs = self.base_model.fc.in_features
+        self.base_model.fc = nn.Linear(num_ftrs, 1)
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x))) # output: [batch_size, 32, 112, 112]
-        x = self.pool(F.relu(self.conv2(x))) # output: [batch_size, 64, 56, 56]
-        x = x.view(-1, 64 * 56 * 56) # flatten
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = self.base_model(x)
         return x
-        

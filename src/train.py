@@ -1,168 +1,220 @@
 import torch
 import torch.optim as optim
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from model import SimpleCNN  # Or your updated model
-import os
 
-from config import device, transform
-from loader import DatasetLoader
+from configs.config import Config
 from dsets.oasis_kaggle import OASISKaggle
-
-import logging
-from rich.console import Console
-from rich.logging import RichHandler
-from rich.table import Table
-from torch.utils.tensorboard import SummaryWriter
+from models.resad import ResAD
+from losses.focal_loss import FocalLoss
+from utils.logger import Logger
+from utils.saver import ModelSaver
+from utils.metrics_handler import MetricsHandler
 
 from torchmetrics import Accuracy, Precision, Recall, F1Score
+from sklearn.utils.class_weight import compute_class_weight
+import numpy as np
+import copy
+import torch.backends.cudnn as cudnn
 
-from label_verification import perform_label_verification
+def main():
+    # Initialize configuration
+    config = Config()
 
-# Initialize rich console and logging
-console = Console()
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(message)s',
-    datefmt='[%X]',
-    handlers=[RichHandler(console=console)]
-)
-logger = logging.getLogger("rich")
+    # Setup logger
+    logger = Logger("rich")
 
-# Initialize TensorBoard writer
-writer = SummaryWriter(log_dir='runs/adCNN_experiment')
+    # Initialize Model Saver
+    saver = ModelSaver(experiment_name="ResAD_DementiaDetection", model_class_name="ResAD", model_dir=config.model_dir)
 
-datasets = (OASISKaggle, )
-loader = DatasetLoader(datasets, test_size=0.2, random_seed=42, batch_size=64)
-train_loader, test_loader = loader.load_datasets()
+    # Initialize Metrics Handler
+    metrics_handler = MetricsHandler(experiment_dir=saver.get_experiment_dir(), log_dir=config.log_dir)
 
-# Perform Label Verification Before Training
-#logger.info("Starting Label Verification...")
-#perform_label_verification(train_loader, test_loader)
-#logger.info("Label Verification Completed.\n")
+    # Configure cuDNN
+    cudnn.benchmark = True  # Enable benchmark mode for optimized performance
 
-model = SimpleCNN().to(device)
-# Optionally apply weight initialization
-# model.apply(weights_init)
+    # Load datasets
+    train_dataset = OASISKaggle(split='train', transform=config.transform)
+    val_dataset = OASISKaggle(split='test', transform=config.transform)
 
-criterion = nn.BCEWithLogitsLoss()
-optimizer = optim.Adam(model.parameters(), lr=1e-4)  # Adjusted learning rate
+    # Calculate class weights for handling class imbalance
+    train_labels = np.array(train_dataset.binary_labels)
+    class_weights = compute_class_weight(
+        class_weight='balanced',
+        classes=np.unique(train_labels),
+        y=train_labels
+    )
+    class_weights = torch.tensor(class_weights, dtype=torch.float32).to(config.device)
+    logger.info(f"Class Weights: {class_weights}")
 
-# Initialize metrics
-accuracy_metric = Accuracy(task="binary").to(device)
-precision_metric = Precision(task="binary").to(device)
-recall_metric = Recall(task="binary").to(device)
-f1_metric = F1Score(task="binary").to(device)
+    # Create weighted sampler for the training data loader
+    sample_weights = class_weights[train_labels.astype(int)]
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True
+    )
 
-# Device information
-logger.info(f'Model on device: {next(model.parameters()).device}')
+    # Data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.batch_size,
+        sampler=sampler,
+        num_workers=config.num_workers,
+        pin_memory=config.pin_memory
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=config.num_workers,
+        pin_memory=config.pin_memory
+    )
 
-num_epochs = 10
+    # Initialize model
+    model = ResAD().to(config.device)
+    logger.info(f'Model on device: {config.device}')
 
-for epoch in range(num_epochs):
-    logger.info(f'\nEpoch {epoch+1}/{num_epochs}')
-    model.train()
-    running_loss = 0.00
+    # Loss function and optimizer
+    criterion = FocalLoss(alpha=class_weights[1].item(), gamma=config.focal_gamma, logits=True, reduce=True)
+    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=1e-4)
 
-    train_loader_tqdm = tqdm(train_loader, desc='Training', leave=False, unit='batch')
+    # Learning rate scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=config.scheduler_factor,
+        patience=config.scheduler_patience,
+        verbose=True
+    )
 
-    for images, labels in train_loader_tqdm:
-        images = images.to(device)
-        labels = labels.to(device).unsqueeze(1).float()  # Ensure labels are float
+    # Metrics
+    accuracy_metric = Accuracy(task="binary").to(config.device)
+    precision_metric = Precision(task="binary").to(config.device)
+    recall_metric = Recall(task="binary").to(config.device)
+    f1_metric = F1Score(task="binary").to(config.device)
 
-        optimizer.zero_grad()
+    # Early stopping variables
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_loss = np.inf
+    epochs_no_improve = 0
 
-        outputs = model(images)
-        loss = criterion(outputs, labels)
+    for epoch in range(config.num_epochs):
+        logger.info(f'\nEpoch {epoch+1}/{config.num_epochs}')
+        model.train()
+        running_loss = 0.0
 
-        loss.backward()
-        # Optionally clip gradients
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
+        train_loader_tqdm = tqdm(train_loader, desc='Training', leave=False, unit='batch')
 
-        running_loss += loss.item() * images.size(0)
+        for images, labels in train_loader_tqdm:
+            images = images.to(config.device, non_blocking=True)
+            labels = labels.to(config.device).unsqueeze(1).float()  # Ensure labels have shape [batch_size, 1]
 
-        train_loader_tqdm.set_postfix(loss=loss.item())
-
-    epoch_loss = running_loss / len(train_loader.dataset)
-    logger.info(f'Training Loss: {epoch_loss:.4f}')
-    writer.add_scalar('Loss/Train', epoch_loss, epoch)
-
-    # Validation
-    model.eval()
-    running_val_loss = 0.00
-    correct = 0
-    total = 0
-    test_loader_tqdm = tqdm(test_loader, desc='Validation', leave=False)
-
-    with torch.no_grad():
-        for images, labels in test_loader_tqdm:
-            images = images.to(device)
-            labels = labels.to(device).unsqueeze(1).float()
+            optimizer.zero_grad()
 
             outputs = model(images)
             loss = criterion(outputs, labels)
 
-            running_val_loss += loss.item() * images.size(0)
+            loss.backward()
+            optimizer.step()
 
-            probabilities = torch.sigmoid(outputs)
-            predicted = (probabilities > 0.5).float()
+            running_loss += loss.item() * images.size(0)
 
-            # Update metrics
-            accuracy_metric.update(predicted, labels)
-            precision_metric.update(predicted, labels)
-            recall_metric.update(predicted, labels)
-            f1_metric.update(predicted, labels)
+            train_loader_tqdm.set_postfix(loss=loss.item())
 
-            test_loader_tqdm.set_postfix(loss=loss.item())
+        epoch_loss = running_loss / len(train_dataset)
+        logger.info(f'Training Loss: {epoch_loss:.4f}')
 
-    val_loss = running_val_loss / len(test_loader.dataset)
-    val_accuracy = accuracy_metric.compute() * 100
-    val_precision = precision_metric.compute() * 100
-    val_recall = recall_metric.compute() * 100
-    val_f1 = f1_metric.compute() * 100
+        # Validation
+        model.eval()
+        val_running_loss = 0.0
+        preds_list = []
+        labels_list = []
+        probs_list = []
 
-    logger.info(f'Validation Loss: {val_loss:.4f}, '
-                f'Accuracy: {val_accuracy:.2f}%, '
-                f'Precision: {val_precision:.2f}%, '
-                f'Recall: {val_recall:.2f}%, '
-                f'F1-Score: {val_f1:.2f}%')
+        val_loader_tqdm = tqdm(val_loader, desc='Validation', leave=False, unit='batch')
 
-    writer.add_scalar('Loss/Validation', val_loss, epoch)
-    writer.add_scalar('Accuracy/Validation', val_accuracy, epoch)
-    writer.add_scalar('Precision/Validation', val_precision, epoch)
-    writer.add_scalar('Recall/Validation', val_recall, epoch)
-    writer.add_scalar('F1_Score/Validation', val_f1, epoch)
+        with torch.no_grad():
+            for images, labels in val_loader_tqdm:
+                images = images.to(config.device, non_blocking=True)
+                labels = labels.to(config.device).unsqueeze(1).float()
 
-    # Reset metrics
-    accuracy_metric.reset()
-    precision_metric.reset()
-    recall_metric.reset()
-    f1_metric.reset()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
 
-    # Summary Table
-    table = Table(title=f"Epoch {epoch+1} Summary")
-    table.add_column("Metric", style="cyan", no_wrap=True)
-    table.add_column("Value", style="magenta")
+                val_running_loss += loss.item() * images.size(0)
 
-    table.add_row("Training Loss", f"{epoch_loss:.4f}")
-    table.add_row("Validation Loss", f"{val_loss:.4f}")
-    table.add_row("Validation Accuracy", f"{val_accuracy:.2f}%")
-    table.add_row("Validation Precision", f"{val_precision:.2f}%")
-    table.add_row("Validation Recall", f"{val_recall:.2f}%")
-    table.add_row("Validation F1-Score", f"{val_f1:.2f}%")
+                probabilities = torch.sigmoid(outputs)
+                preds = (probabilities >= 0.5).float()
 
-    console.print(table)
+                preds_list.append(preds)
+                labels_list.append(labels)
+                probs_list.append(probabilities)
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-models_path = os.path.join(project_root, 'models')
-# Save the model
-if not os.path.exists(models_path):
-    os.makedirs(models_path)
-save_to = os.path.join(models_path, 'adCNN.pth')
-torch.save(model.state_dict(), save_to)
-logger.info('Model saved to models/adCNN.pth')
+                val_loader_tqdm.set_postfix(loss=loss.item())
 
-writer.close()
+        val_loss = val_running_loss / len(val_dataset)
 
+        preds_tensor = torch.cat(preds_list)
+        labels_tensor = torch.cat(labels_list)
+
+        val_accuracy = accuracy_metric(preds_tensor, labels_tensor) * 100
+        val_precision = precision_metric(preds_tensor, labels_tensor) * 100
+        val_recall = recall_metric(preds_tensor, labels_tensor) * 100
+        val_f1 = f1_metric(preds_tensor, labels_tensor) * 100
+
+        logger.info(f'Validation Loss: {val_loss:.4f}, '
+                    f'Accuracy: {val_accuracy:.2f}%, '
+                    f'Precision: {val_precision:.2f}%, '
+                    f'Recall: {val_recall:.2f}%, '
+                    f'F1-Score: {val_f1:.2f}%')
+
+        # Prepare metrics dictionary
+        metrics = {
+            "Validation Loss": round(val_loss, 4),
+            "Accuracy": round(val_accuracy.item(), 2),
+            "Precision": round(val_precision.item(), 2),
+            "Recall": round(val_recall.item(), 2),
+            "F1-Score": round(val_f1.item(), 2)
+        }
+
+        # Handle metrics logging
+        metrics_handler.handle_metrics(metrics_dict=metrics, epoch=epoch+1)
+
+        # Reset metrics
+        accuracy_metric.reset()
+        precision_metric.reset()
+        recall_metric.reset()
+        f1_metric.reset()
+
+        # Learning rate adjustment
+        scheduler.step(val_loss)
+
+        # Early stopping and model saving
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_model_wts = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+
+            # Save the best model
+            saved_model_path = saver.save_model(model, epoch+1, val_loss, val_f1, best=True)
+            logger.info(f"Validation loss decreased, saving new best model as {saved_model_path}")
+        else:
+            epochs_no_improve += 1
+            logger.info(f"No improvement in validation loss for {epochs_no_improve} epoch(s)")
+            if epochs_no_improve >= config.early_stopping_patience:
+                logger.info("Early stopping triggered.")
+                break
+
+    # Load the best model weights after training
+    model.load_state_dict(best_model_wts)
+    final_model_filename = f"{saver.model_class_name}_final_bestLoss{best_loss:.4f}.pth"
+    final_model_path = os.path.join(saver.experiment_dir, final_model_filename)
+    torch.save(model.state_dict(), final_model_path)
+    logger.info(f'Final model saved to {final_model_path}')
+
+    # Close Metrics Handler (closes TensorBoard writer)
+    metrics_handler.close()
+
+if __name__ == '__main__':
+    main()

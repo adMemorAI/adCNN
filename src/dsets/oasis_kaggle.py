@@ -7,24 +7,39 @@ import re
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 
-from config import transform  # Ensure this is correctly defined in your config
+from config import transform  
 
 class OASISKaggle(Dataset):
-    # Class variables to store train and test patient IDs for consistency
     _train_patient_ids = None
     _test_patient_ids = None
+
+    # Define class to binary label mapping as a class variable
+    class_to_binary_label = {
+        'no-dementia': 0,
+        'verymild-dementia': 1,
+        'mild-dementia': 1,
+        'moderate-dementia': 1
+    }
 
     @classmethod
     def _prepare_split(cls, df, test_size=0.2, random_seed=42):
         """
         Splits the patient IDs into train and test sets and stores them as class variables.
+        Stratifies based on per-patient binary labels.
         """
         if cls._train_patient_ids is None or cls._test_patient_ids is None:
-            # Extract unique patient IDs
-            patient_ids = df['patient_id'].unique()
-            # Perform the split
+            # Extract unique patient IDs and their corresponding labels
+            df_patient = df.drop_duplicates('patient_id')
+            patient_ids = df_patient['patient_id'].values
+            # Map textual labels to binary labels
+            labels_per_patient = [cls.class_to_binary_label[label] for label in df_patient['label']]
+
+            # Perform the split with stratification to maintain class distribution
             train_ids, test_ids = train_test_split(
-                patient_ids, test_size=test_size, random_state=random_seed
+                patient_ids,
+                test_size=test_size,
+                random_state=random_seed,
+                stratify=labels_per_patient
             )
             cls._train_patient_ids = train_ids
             cls._test_patient_ids = test_ids
@@ -40,7 +55,7 @@ class OASISKaggle(Dataset):
             random_seed (int): Seed for reproducibility.
         """
         project_root = Path(__file__).parent.parent.parent
-        dataset_dir = os.path.join(project_root, "datasets")
+        dataset_dir = os.path.join(project_root, "datasets") # expected path: /adCNN/datasets
         self.path = os.path.join(dataset_dir, "oasis_kaggle")
         self.split = split
         self.transform = transform
@@ -65,12 +80,6 @@ class OASISKaggle(Dataset):
         self.labels = self.df['label'].tolist()
 
         # Define binary labels
-        self.class_to_binary_label = {
-            'no-dementia': 0,
-            'verymild-dementia': 1,
-            'mild-dementia': 1,
-            'moderate-dementia': 1
-        }
         self.binary_labels = [self.class_to_binary_label[label] for label in self.labels]
 
     @staticmethod
@@ -84,7 +93,7 @@ class OASISKaggle(Dataset):
         Returns:
             tuple: (patient_id, mr_id, scan_id, layer_id) or (None, None, None, None) if pattern doesn't match.
         """
-        pattern = re.compile(r'OAS1_(\d+)_MR(\d+)_mpr-(\d+)_(\d+).jpg')
+        pattern = re.compile(r'OAS1_(\d+)_MR(\d+)_mpr-(\d+)_(\d+).jpg', re.IGNORECASE)
         match = pattern.match(filename)
         if match:
             patient_id = int(match.group(1))
@@ -116,7 +125,7 @@ class OASISKaggle(Dataset):
                 print(f"Directory {cls_dir} does not exist. Skipping.")
                 continue
             for file in os.listdir(cls_dir):
-                if file.endswith('.jpg'):
+                if file.lower().endswith('.jpg'):
                     patient_id, mr_id, scan_id, layer_id = cls.get_info_from_filename(file)
                     if patient_id is None:
                         continue  # Skip files with invalid filenames
@@ -143,10 +152,9 @@ class OASISKaggle(Dataset):
         Returns:
             tuple: (image, label)
         """
-        image = Image.open(self.image_paths[idx]).convert('RGB')  # Ensure image is in RGB
+        image = Image.open(self.image_paths[idx]).convert('L')  # Load image in grayscale
         if self.transform:
             image = self.transform(image)
         label = self.binary_labels[idx]
-        label = torch.tensor(label, dtype=torch.float32)
+        label = torch.tensor(label, dtype=torch.float32)  # BCEWithLogitsLoss expects float labels
         return image, label
-
