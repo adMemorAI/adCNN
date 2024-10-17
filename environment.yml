@@ -1,4 +1,4 @@
-nme: adCNN
+name: adCNN
 channels:
   - defaults
   - pytorch
