@@ -1,44 +1,30 @@
+# predict.py
+
 import torch
 from PIL import Image
 import argparse
-from models.resad import ResAD # Updated to match your trained model
-from config import device, transform
+from models.model_factory import get_model, extract_model_name  # Correct import
+from configs.config import Config
+from utils.logger import Logger
 import os
+import sys
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Predict Dementia from an image using a trained CNN model.')
-    parser.add_argument('image_path', type=str, help='Path to the input image.')
+    parser.add_argument('--model_path', type=str, required=True, help='Path to the trained model .pth file.')
+    parser.add_argument('--image_path', type=str, required=True, help='Path to the input image.')
     return parser.parse_args()
 
-def load_model(model_path, device):
-    if not os.path.exists(model_path):
-        print(f"Model file not found at {model_path}")
-        exit(1)
-    
-    model = ResAD().to(device)  # Updated to match your trained model class
-    try:
-        state_dict = torch.load(model_path, map_location=device)
-        model.load_state_dict(state_dict)
-    except Exception as e:
-        print(f"Error loading the model state_dict: {e}")
-        exit(1)
-    
-    model.eval()
-    return model
-
-def preprocess_image(image_path):
+def preprocess_image(image_path, transform):
     try:
         image = Image.open(image_path)
-        # Ensure the image is in grayscale mode since your model expects 1-channel input
-        image = image.convert('L')
     except Exception as e:
-        print(f"Error opening image: {e}")
-        exit(1)
-    
+        raise ValueError(f"Error opening image: {e}") from e
+
     image = transform(image).unsqueeze(0)  # Add batch dimension
     return image
 
-def predict(image, model, device):
+def predict(image, model, device, threshold=0.5):
     image = image.to(device)
     
     with torch.no_grad():
@@ -48,50 +34,79 @@ def predict(image, model, device):
             'Non-Dementia': 1 - probability,
             'Dementia': probability
         }
-        predicted_class = 'Dementia' if probability >= 0.5 else 'Non-Dementia'
+        predicted_class = 'Dementia' if probability >= threshold else 'Non-Dementia'
         confidence = class_probabilities[predicted_class] * 100
 
     return predicted_class, class_probabilities, confidence
 
 def main():
     args = parse_arguments()
+    model_path = args.model_path
     image_path = args.image_path
 
-    # Verify the image path exists
-    if not os.path.exists(image_path):
-        print(f"Image file not found at {image_path}")
-        exit(1)
+    # Initialize Logger
+    logger = Logger("predictor")
     
+    # Initialize Config
+    config = Config()
+
     # Load the model
-    model_path = "/home/diejor/projects/aimf24/adCNN/src/models/ResAD_DementiaDetection_20241012_175906/ResAD_best_epoch1_valLoss0.2724_f162.69.pth"  # Update with the correct model path
-    model = load_model(model_path, device)
-    
-    # Preprocess the image
-    image = preprocess_image(image_path)
-    
+    try:
+        model = get_model(model_path, config.device)
+        model_name = extract_model_name(model_path)
+        logger.info(f"Model '{model_name}' loaded successfully from {model_path}.")
+    except (FileNotFoundError, ValueError, ImportError) as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+    # Preprocess the image using model-specific transform
+    try:
+        transform = config.transform
+        image = preprocess_image(image_path, transform)
+        logger.info(f"Image '{image_path}' loaded and preprocessed successfully.")
+        print(f"Preprocessed image tensor shape: {image.shape}")  # Debug statement
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(str(e))
+        sys.exit(1)
+
     # Make prediction
-    predicted_class, class_probabilities, confidence = predict(image, model, device)
-    
+    try:
+        predicted_class, class_probabilities, confidence = predict(image, model, config.device)
+    except Exception as e:
+        logger.error(f"Error during prediction: {e}")
+        sys.exit(1)
+
     # Display results
     print(f"\n=== Prediction Results ===")
-    print(f"Image Path       : {image_path}")
-    print(f"Predicted Class  : {predicted_class}")
-    print(f"Confidence       : {confidence:.2f}%\n")
+    print(f"Image Path        : {image_path}")
+    print(f"Predicted Class   : {predicted_class}")
+    print(f"Confidence        : {confidence:.2f}%\n")
     print(f"Class Probabilities:")
     for cls, prob in class_probabilities.items():
         print(f"  - {cls}: {prob*100:.2f}%")
     print("==========================\n")
-    
+
     # Optional: Visualize the image with prediction
     try:
         import matplotlib.pyplot as plt
-        image_display = Image.open(image_path).convert('L')  # Load as grayscale for display
-        plt.imshow(image_display, cmap='gray')
+        image_display = Image.open(image_path)
+        # Determine number of channels from model_params
+        model_params = config.model_params.get(model_name, {})
+        input_channels = model_params.get('input_channels', 3)
+        if input_channels == 1:
+            image_display = image_display.convert('L')
+            cmap = 'gray'
+        else:
+            image_display = image_display.convert('RGB')
+            cmap = None
+        plt.imshow(image_display, cmap=cmap)
         plt.title(f"Prediction: {predicted_class} ({confidence:.2f}%)")
         plt.axis('off')
         plt.show()
     except ImportError:
-        pass  # If matplotlib is not installed, skip visualization
+        logger.info("matplotlib is not installed. Skipping image visualization.")
+    except Exception as e:
+        logger.error(f"Error during image visualization: {e}")
 
 if __name__ == '__main__':
     main()

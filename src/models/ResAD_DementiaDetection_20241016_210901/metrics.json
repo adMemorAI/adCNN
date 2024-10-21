@@ -1,0 +1,26 @@
+[
+    {
+        "epoch": 1,
+        "Validation Loss": 0.362,
+        "Accuracy": 76.88,
+        "Precision": 48.01,
+        "Recall": 59.96,
+        "F1-Score": 53.32
+    },
+    {
+        "epoch": 2,
+        "Validation Loss": 0.54,
+        "Accuracy": 76.88,
+        "Precision": 48.45,
+        "Recall": 77.94,
+        "F1-Score": 59.75
+    },
+    {
+        "epoch": 3,
+        "Validation Loss": 0.5371,
+        "Accuracy": 76.75,
+        "Precision": 48.14,
+        "Recall": 72.32,
+        "F1-Score": 57.8
+    }
+]

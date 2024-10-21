@@ -7,21 +7,18 @@ import subprocess
 
 from configs.config import Config
 from dsets.oasis_kaggle import OASISKaggle
-from models.resad import ResAD
 from losses.focal_loss import FocalLoss
+from utils.logger import Logger
+from utils.saver import ModelSaver
+from utils.metrics_handler import MetricsHandler
+from models.model_factory import get_model, get_default_model
+
 from torchmetrics import Accuracy, Precision, Recall, F1Score
 from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
 import copy
 import torch.backends.cudnn as cudnn
 import os
-
-def get_git_commit():
-    """Retrieve the current git commit hash."""
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode()
-    except Exception:
-        return "unknown"
 
 def main():
     # Initialize configuration
@@ -30,31 +27,21 @@ def main():
     # Configure cuDNN for optimized performance
     cudnn.benchmark = True
 
-    # Initialize wandb
-    wandb.init(
-        project="ResNet",  # Replace with your wandb project name
-        config={
-            "learning_rate": config.learning_rate,
-            "batch_size": config.batch_size,
-            "num_epochs": config.num_epochs,
-            "focal_gamma": config.focal_gamma,
-            "scheduler_factor": config.scheduler_factor,
-            "scheduler_patience": config.scheduler_patience,
-            "optimizer": "Adam",
-            "loss_function": "FocalLoss",
-            "model": "ResAD",
-            "git_commit": get_git_commit(),
-            # Add other hyperparameters as needed
-        },
-        name=f"Run-{wandb.util.generate_id()}",
-        tags=["training", "ResAD", "baseline"],  # Add relevant tags
+    # Initialize Model Saver
+    saver = ModelSaver(
+        experiment_name=f"{config.model_name}_DementiaDetection",
+        model_class_name=config.model_name,
+        model_dir=config.model_dir
     )
 
-    # Log additional configurations if necessary
-    wandb.config.update({
-        "experiment_dir": config.model_dir,
-        "log_dir": config.model_dir,  # Assuming log_dir is same as model_dir
-    }, allow_val_change=True)
+    # Initialize Metrics Handler
+    metrics_handler = MetricsHandler(
+        experiment_dir=saver.get_experiment_dir(),
+        log_dir=config.log_dir
+    )
+
+    # Configure cuDNN
+    cudnn.benchmark = True  # Enable benchmark mode for optimized performance
 
     # Load datasets
     train_dataset = OASISKaggle(split='train', transform=config.transform)
@@ -94,8 +81,9 @@ def main():
         pin_memory=config.pin_memory
     )
 
-    # Initialize model
-    model = ResAD().to(config.device)
+    # Initialize model using the Model Factory
+    model = get_default_model()
+    logger.info(f'Model "{config.model_name}" initialized on device: {config.device}')
 
     # Watch the model (logs gradients and model graph)
     wandb.watch(model, log="all")
