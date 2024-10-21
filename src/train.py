@@ -2,36 +2,59 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import wandb  
+import subprocess
 
 from configs.config import Config
 from dsets.oasis_kaggle import OASISKaggle
 from models.resad import ResAD
 from losses.focal_loss import FocalLoss
-from utils.logger import Logger
-from utils.saver import ModelSaver
-from utils.metrics_handler import MetricsHandler
-
 from torchmetrics import Accuracy, Precision, Recall, F1Score
 from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
 import copy
 import torch.backends.cudnn as cudnn
+import os
+
+def get_git_commit():
+    """Retrieve the current git commit hash."""
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode()
+    except Exception:
+        return "unknown"
 
 def main():
     # Initialize configuration
     config = Config()
 
-    # Setup logger
-    logger = Logger("rich")
+    # Configure cuDNN for optimized performance
+    cudnn.benchmark = True
 
-    # Initialize Model Saver
-    saver = ModelSaver(experiment_name="ResAD_DementiaDetection", model_class_name="ResAD", model_dir=config.model_dir)
+    # Initialize wandb
+    wandb.init(
+        project="ResNet",  # Replace with your wandb project name
+        config={
+            "learning_rate": config.learning_rate,
+            "batch_size": config.batch_size,
+            "num_epochs": config.num_epochs,
+            "focal_gamma": config.focal_gamma,
+            "scheduler_factor": config.scheduler_factor,
+            "scheduler_patience": config.scheduler_patience,
+            "optimizer": "Adam",
+            "loss_function": "FocalLoss",
+            "model": "ResAD",
+            "git_commit": get_git_commit(),
+            # Add other hyperparameters as needed
+        },
+        name=f"Run-{wandb.util.generate_id()}",
+        tags=["training", "ResAD", "baseline"],  # Add relevant tags
+    )
 
-    # Initialize Metrics Handler
-    metrics_handler = MetricsHandler(experiment_dir=saver.get_experiment_dir(), log_dir=config.log_dir)
-
-    # Configure cuDNN
-    cudnn.benchmark = True  # Enable benchmark mode for optimized performance
+    # Log additional configurations if necessary
+    wandb.config.update({
+        "experiment_dir": config.model_dir,
+        "log_dir": config.model_dir,  # Assuming log_dir is same as model_dir
+    }, allow_val_change=True)
 
     # Load datasets
     train_dataset = OASISKaggle(split='train', transform=config.transform)
@@ -45,7 +68,7 @@ def main():
         y=train_labels
     )
     class_weights = torch.tensor(class_weights, dtype=torch.float32).to(config.device)
-    logger.info(f"Class Weights: {class_weights}")
+    wandb.log({"Class Weights": class_weights.tolist()})
 
     # Create weighted sampler for the training data loader
     sample_weights = class_weights[train_labels.astype(int)]
@@ -73,13 +96,20 @@ def main():
 
     # Initialize model
     model = ResAD().to(config.device)
-    logger.info(f'Model on device: {config.device}')
 
-    # Loss function and optimizer
-    criterion = FocalLoss(alpha=class_weights[1].item(), gamma=config.focal_gamma, logits=True, reduce=True)
+    # Watch the model (logs gradients and model graph)
+    wandb.watch(model, log="all")
+
+    # Define loss function and optimizer
+    criterion = FocalLoss(
+        alpha=class_weights[1].item(),
+        gamma=config.focal_gamma,
+        logits=True,
+        reduce=True
+    )
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=1e-4)
 
-    # Learning rate scheduler
+    # Define learning rate scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
@@ -88,19 +118,21 @@ def main():
         verbose=True
     )
 
-    # Metrics
+    # Define metrics
     accuracy_metric = Accuracy(task="binary").to(config.device)
     precision_metric = Precision(task="binary").to(config.device)
     recall_metric = Recall(task="binary").to(config.device)
     f1_metric = F1Score(task="binary").to(config.device)
 
-    # Early stopping variables
+    # Initialize variables for early stopping and best model tracking
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = np.inf
     epochs_no_improve = 0
 
     for epoch in range(config.num_epochs):
-        logger.info(f'\nEpoch {epoch+1}/{config.num_epochs}')
+        wandb.log({"Epoch": epoch + 1})  # Log the current epoch
+
+        # Training Phase
         model.train()
         running_loss = 0.0
 
@@ -120,12 +152,13 @@ def main():
 
             running_loss += loss.item() * images.size(0)
 
+            # Update tqdm progress bar
             train_loader_tqdm.set_postfix(loss=loss.item())
 
         epoch_loss = running_loss / len(train_dataset)
-        logger.info(f'Training Loss: {epoch_loss:.4f}')
+        wandb.log({"Train Loss": epoch_loss})
 
-        # Validation
+        # Validation Phase
         model.eval()
         val_running_loss = 0.0
         preds_list = []
@@ -151,6 +184,7 @@ def main():
                 labels_list.append(labels)
                 probs_list.append(probabilities)
 
+                # Update tqdm progress bar
                 val_loader_tqdm.set_postfix(loss=loss.item())
 
         val_loss = val_running_loss / len(val_dataset)
@@ -163,58 +197,61 @@ def main():
         val_recall = recall_metric(preds_tensor, labels_tensor) * 100
         val_f1 = f1_metric(preds_tensor, labels_tensor) * 100
 
-        logger.info(f'Validation Loss: {val_loss:.4f}, '
-                    f'Accuracy: {val_accuracy:.2f}%, '
-                    f'Precision: {val_precision:.2f}%, '
-                    f'Recall: {val_recall:.2f}%, '
-                    f'F1-Score: {val_f1:.2f}%')
+        # Log validation metrics to wandb
+        wandb.log({
+            "Validation Loss": val_loss,
+            "Validation Accuracy": val_accuracy.item(),
+            "Validation Precision": val_precision.item(),
+            "Validation Recall": val_recall.item(),
+            "Validation F1-Score": val_f1.item(),
+            "Learning Rate": optimizer.param_groups[0]['lr'],
+        })
 
-        # Prepare metrics dictionary
-        metrics = {
-            "Validation Loss": round(val_loss, 4),
-            "Accuracy": round(val_accuracy.item(), 2),
-            "Precision": round(val_precision.item(), 2),
-            "Recall": round(val_recall.item(), 2),
-            "F1-Score": round(val_f1.item(), 2)
-        }
-
-        # Handle metrics logging
-        metrics_handler.handle_metrics(metrics_dict=metrics, epoch=epoch+1)
-
-        # Reset metrics
+        # Reset metrics for next epoch
         accuracy_metric.reset()
         precision_metric.reset()
         recall_metric.reset()
         f1_metric.reset()
 
-        # Learning rate adjustment
+        # Step the scheduler
         scheduler.step(val_loss)
 
-        # Early stopping and model saving
+        # Early Stopping and Best Model Saving
         if val_loss < best_loss:
             best_loss = val_loss
             best_model_wts = copy.deepcopy(model.state_dict())
             epochs_no_improve = 0
 
             # Save the best model
-            saved_model_path = saver.save_model(model, epoch+1, val_loss, val_f1, best=True)
-            logger.info(f"Validation loss decreased, saving new best model as {saved_model_path}")
+            saved_model_path = os.path.join(config.model_dir, f"ResAD_best_loss_{best_loss:.4f}.pth")
+            torch.save(model.state_dict(), saved_model_path)
+            wandb.save(saved_model_path)  # Log the model file
+
+            # Log the model checkpoint as an artifact
+            artifact = wandb.Artifact('best_model', type='model')
+            artifact.add_file(saved_model_path)
+            wandb.log_artifact(artifact)
+
+            wandb.run.summary["best_val_loss"] = best_loss
+            wandb.run.summary["best_val_f1"] = val_f1.item()
         else:
             epochs_no_improve += 1
-            logger.info(f"No improvement in validation loss for {epochs_no_improve} epoch(s)")
             if epochs_no_improve >= config.early_stopping_patience:
-                logger.info("Early stopping triggered.")
+                wandb.log({"Early Stopping": True})
                 break
 
-    # Load the best model weights after training
+    # Load the best model weights
     model.load_state_dict(best_model_wts)
-    final_model_filename = f"{saver.model_class_name}_final_bestLoss{best_loss:.4f}.pth"
-    final_model_path = os.path.join(saver.experiment_dir, final_model_filename)
+    final_model_path = os.path.join(config.model_dir, f"ResAD_final_bestLoss_{best_loss:.4f}.pth")
     torch.save(model.state_dict(), final_model_path)
-    logger.info(f'Final model saved to {final_model_path}')
 
-    # Close Metrics Handler (closes TensorBoard writer)
-    metrics_handler.close()
+    # Log the final model as an artifact
+    artifact = wandb.Artifact('final_model', type='model')
+    artifact.add_file(final_model_path)
+    wandb.log_artifact(artifact)
+
+    # Finish the wandb run
+    wandb.finish()
 
 if __name__ == '__main__':
     main()

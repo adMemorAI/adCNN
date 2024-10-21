@@ -1,0 +1,17 @@
+{"time":"2024-10-20T17:29:49.427693051-05:00","level":"INFO","msg":"using version","core version":"0.18.5"}
+{"time":"2024-10-20T17:29:49.427707884-05:00","level":"INFO","msg":"created symlink","path":"/home/diejor/projects/aimf24/adCNN/src/wandb/run-20241020_172949-sa29rr4t/logs/debug-core.log"}
+{"time":"2024-10-20T17:29:49.578076395-05:00","level":"INFO","msg":"created new stream","id":"sa29rr4t"}
+{"time":"2024-10-20T17:29:49.578116177-05:00","level":"INFO","msg":"stream: started","id":"sa29rr4t"}
+{"time":"2024-10-20T17:29:49.578144936-05:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"sa29rr4t"}}
+{"time":"2024-10-20T17:29:49.578168493-05:00","level":"INFO","msg":"handler: started","stream_id":{"value":"sa29rr4t"}}
+{"time":"2024-10-20T17:29:49.578206661-05:00","level":"INFO","msg":"sender: started","stream_id":"sa29rr4t"}
+{"time":"2024-10-20T17:29:49.788370154-05:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-10-20T17:35:54.021992365-05:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-10-20T17:35:54.022774037-05:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-10-20T17:35:55.022479268-05:00","level":"INFO","msg":"handler: operation stats","stats":{"operations":[{"desc":"uploading artifact final_model","runtime_seconds":1.002970842,"subtasks":[{"desc":"ResAD_final_bestLoss_0.2573.pth","runtime_seconds":0.696966558,"progress":"3.0MB/42.7MB"}]}],"total_operations":1}}
+{"time":"2024-10-20T17:36:03.853541314-05:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2024-10-20T17:36:05.011007336-05:00","level":"INFO","msg":"stream: closing","id":"sa29rr4t"}
+{"time":"2024-10-20T17:36:05.011053343-05:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"sa29rr4t"}}
+{"time":"2024-10-20T17:36:05.011077029-05:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"sa29rr4t"}}
+{"time":"2024-10-20T17:36:05.011146525-05:00","level":"INFO","msg":"sender: closed","stream_id":"sa29rr4t"}
+{"time":"2024-10-20T17:36:05.011155281-05:00","level":"INFO","msg":"stream: closed","id":"sa29rr4t"}
