@@ -3,7 +3,10 @@ channels:
   - defaults
   - pytorch
 dependencies:
-  - python
+  - python=3.9
+  - pytorch=2.4
+  - torchvision=0.19
+  - torchmetrics
   - cudatoolkit
   - tqdm
   - numpy
@@ -11,12 +14,9 @@ dependencies:
   - matplotlib
   - scikit-learn
   - pillow
-  - pytorch
-  - torchvision
-  - torchmetrics
-  - tensorboard
   - rich
   - pip
   - pip:
       - nibabel
       - kaggle
+      - wandb

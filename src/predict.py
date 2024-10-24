@@ -1,112 +1,168 @@
 # predict.py
 
 import torch
+from torchvision import transforms
 from PIL import Image
 import argparse
-from models.model_factory import get_model, extract_model_name  # Correct import
-from configs.config import Config
-from utils.logger import Logger
-import os
+import subprocess
 import sys
+import logging
+import wandb
+import os
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='Predict Dementia from an image using a trained CNN model.')
-    parser.add_argument('--model_path', type=str, required=True, help='Path to the trained model .pth file.')
-    parser.add_argument('--image_path', type=str, required=True, help='Path to the input image.')
-    return parser.parse_args()
+from config import Config
+from models.model_factory import get_default_model
 
-def preprocess_image(image_path, transform):
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,  # Set to DEBUG for more detailed logs
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Log to console
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+def get_git_commit():
+    """Retrieve the current git commit hash."""
     try:
-        image = Image.open(image_path)
+        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode()
+        logger.debug(f"Git commit hash: {commit_hash}")
+        return commit_hash
     except Exception as e:
-        raise ValueError(f"Error opening image: {e}") from e
+        logger.warning(f"Could not retrieve git commit hash: {e}")
+        return "unknown"
 
-    image = transform(image).unsqueeze(0)  # Add batch dimension
-    return image
+def load_image(image_path, transform):
+    """Load and preprocess the image."""
+    try:
+        logger.info(f"Loading image from {image_path}")
+        image = Image.open(image_path).convert('L')  # Convert to grayscale if needed
+        image = transform(image).unsqueeze(0)  # Add batch dimension
+        logger.debug(f"Preprocessed image tensor shape: {image.shape}")
+        return image
+    except Exception as e:
+        logger.error(f"Error loading image: {e}")
+        return None  # Return None to handle errors gracefully
 
-def predict(image, model, device, threshold=0.5):
-    image = image.to(device)
-    
-    with torch.no_grad():
-        output = model(image)
-        probability = torch.sigmoid(output).item()
-        class_probabilities = {
-            'Non-Dementia': 1 - probability,
-            'Dementia': probability
-        }
-        predicted_class = 'Dementia' if probability >= threshold else 'Non-Dementia'
-        confidence = class_probabilities[predicted_class] * 100
+def load_model(model_path, device):
+    """Load the trained model."""
+    try:
+        logger.info(f"Loading model from {model_path}")
+        model = get_default_model().to(device)
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval()
+        logger.info("Model loaded successfully.")
+        return model
+    except Exception as e:
+        logger.error(f"Error loading model: {e}")
+        sys.exit(1)
 
-    return predicted_class, class_probabilities, confidence
+def make_prediction(model, image, device):
+    """Perform inference and make a prediction."""
+    try:
+        image = image.to(device)
+        with torch.no_grad():
+            outputs = model(image)
+            probabilities = torch.sigmoid(outputs)
+            preds = (probabilities >= 0.5).float()
+        logger.debug(f"Raw Outputs: {outputs}")
+        logger.debug(f"Probabilities: {probabilities}")
+        logger.debug(f"Predictions: {preds}")
+        return preds.item(), probabilities.item()
+    except Exception as e:
+        logger.error(f"Error during inference: {e}")
+        return None, None  # Return None values to handle errors gracefully
 
 def main():
-    args = parse_arguments()
-    model_path = args.model_path
-    image_path = args.image_path
+    parser = argparse.ArgumentParser(description='ADCNN Prediction Script')
+    parser.add_argument('--model_path', type=str, required=True, help='Path to the trained model weights')
+    parser.add_argument('--image_dir', type=str, required=False, help='Path to the directory containing images')
+    args = parser.parse_args()
 
-    # Initialize Logger
-    logger = Logger("predictor")
-    
-    # Initialize Config
+    # Initialize wandb
+    wandb.init(
+        project="ResAD",
+        entity="adCNN",
+        config={
+            "model_path": args.model_path,
+            "image_dir": args.image_dir,
+            "git_commit": get_git_commit(),
+        },
+        name=f"Prediction-{wandb.util.generate_id()}",
+        tags=["prediction", "ResAD"],
+    )
+
+    # Initialize configuration
     config = Config()
 
-    # Load the model
-    try:
-        model = get_model(model_path, config.device)
-        model_name = extract_model_name(model_path)
-        logger.info(f"Model '{model_name}' loaded successfully from {model_path}.")
-    except (FileNotFoundError, ValueError, ImportError) as e:
-        logger.error(str(e))
+    # Configure device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+
+    # Define image transformations (ensure consistency with training)
+    transform = config.transform
+
+    # Determine the image directory
+    if args.image_dir:
+        image_dir = args.image_dir
+    else:
+        # Use default images directory in project_dir
+        image_dir = os.path.join(config.project_root, 'images')
+
+    # Ensure the image directory exists
+    if not os.path.isdir(image_dir):
+        logger.error(f"Image directory does not exist: {image_dir}")
         sys.exit(1)
 
-    # Preprocess the image using model-specific transform
-    try:
-        transform = config.transform
-        image = preprocess_image(image_path, transform)
-        logger.info(f"Image '{image_path}' loaded and preprocessed successfully.")
-        print(f"Preprocessed image tensor shape: {image.shape}")  # Debug statement
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(str(e))
-        sys.exit(1)
+    # Load the model once
+    model = load_model(args.model_path, device)
 
-    # Make prediction
-    try:
-        predicted_class, class_probabilities, confidence = predict(image, model, config.device)
-    except Exception as e:
-        logger.error(f"Error during prediction: {e}")
-        sys.exit(1)
+    # Prepare the wandb Table
+    columns = ["id", "image", "predicted_label", "probability"]
+    prediction_table = wandb.Table(columns=columns)
 
-    # Display results
-    print(f"\n=== Prediction Results ===")
-    print(f"Image Path        : {image_path}")
-    print(f"Predicted Class   : {predicted_class}")
-    print(f"Confidence        : {confidence:.2f}%\n")
-    print(f"Class Probabilities:")
-    for cls, prob in class_probabilities.items():
-        print(f"  - {cls}: {prob*100:.2f}%")
-    print("==========================\n")
+    # Define class labels
+    classes = ["Non-Dementia", "Dementia"]
 
-    # Optional: Visualize the image with prediction
-    try:
-        import matplotlib.pyplot as plt
-        image_display = Image.open(image_path)
-        # Determine number of channels from model_params
-        model_params = config.model_params.get(model_name, {})
-        input_channels = model_params.get('input_channels', 3)
-        if input_channels == 1:
-            image_display = image_display.convert('L')
-            cmap = 'gray'
-        else:
-            image_display = image_display.convert('RGB')
-            cmap = None
-        plt.imshow(image_display, cmap=cmap)
-        plt.title(f"Prediction: {predicted_class} ({confidence:.2f}%)")
-        plt.axis('off')
-        plt.show()
-    except ImportError:
-        logger.info("matplotlib is not installed. Skipping image visualization.")
-    except Exception as e:
-        logger.error(f"Error during image visualization: {e}")
+    # Get list of image files
+    image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff'))]
 
-if __name__ == '__main__':
+    if not image_files:
+        logger.warning(f"No images found in directory: {image_dir}")
+        sys.exit(0)
+
+    # Process each image
+    for img_file in image_files:
+        img_path = os.path.join(image_dir, img_file)
+
+        # Load and preprocess the image
+        image = load_image(img_path, transform)
+        if image is None:
+            continue  # Skip if image failed to load
+
+        # Make prediction
+        prediction, probability = make_prediction(model, image, device)
+        if prediction is None:
+            continue  # Skip if prediction failed
+
+        predicted_class = classes[int(round(prediction))]
+
+        # Log prediction with confidence
+        logger.info(f"Image: {img_file} - Prediction: {predicted_class} with probability {probability:.4f}")
+
+        # Add data to the wandb Table
+        prediction_table.add_data(
+            img_file,                       # Image ID
+            wandb.Image(img_path),          # Image
+            predicted_class,                # Predicted label
+            probability                     # Confidence probability
+        )
+
+    # Log the Table to wandb
+    wandb.log({"prediction_table": prediction_table})
+    wandb.finish()
+
+if __name__ == "__main__":
     main()

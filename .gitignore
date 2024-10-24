@@ -4,4 +4,6 @@ dataset/
 datasets/
 __*
 
+images
+wandb*
 *Zone.identifier

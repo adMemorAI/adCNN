@@ -1,3 +1,0 @@
-/home/diejor/miniconda3/envs/adCNN/lib/python3.8/site-packages/torch/optim/lr_scheduler.py:60: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
-  warnings.warn(
-                                                                                                                                                                                                                                                                                 

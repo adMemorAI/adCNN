@@ -1,3 +1,5 @@
+# train.py
+
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -5,12 +7,9 @@ from tqdm import tqdm
 import wandb  
 import subprocess
 
-from configs.config import Config
+from config import Config
 from dsets.oasis_kaggle import OASISKaggle
 from losses.focal_loss import FocalLoss
-from utils.logger import Logger
-from utils.saver import ModelSaver
-from utils.metrics_handler import MetricsHandler
 from models.model_factory import get_model, get_default_model
 
 from torchmetrics import Accuracy, Precision, Recall, F1Score
@@ -20,32 +19,45 @@ import copy
 import torch.backends.cudnn as cudnn
 import os
 
+def get_git_commit():
+    """Retrieve the current git commit hash."""
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode()
+    except Exception:
+        return "unknown"
+
 def main():
+
     # Initialize configuration
     config = Config()
 
     # Configure cuDNN for optimized performance
     cudnn.benchmark = True
 
-    # Initialize Model Saver
-    saver = ModelSaver(
-        experiment_name=f"{config.model_name}_DementiaDetection",
-        model_class_name=config.model_name,
-        model_dir=config.model_dir
+    # Initialize wandb
+    wandb.init(
+        project="ResAD",          
+        entity="adCNN",      
+        config={
+            "model": config.model_name,
+            "dataset": "OASIS-Kaggle",
+            "learning_rate": config.learning_rate,
+            "batch_size": config.batch_size,
+            "num_epochs": config.num_epochs,
+            "focal_gamma": config.focal_gamma,
+            "scheduler_factor": config.scheduler_factor,
+            "scheduler_patience": config.scheduler_patience,
+            "early_stopping_patience": config.early_stopping_patience,
+            "git_commit": get_git_commit(),
+            # Add other hyperparameters as needed
+        },
+        name=f"Run-{wandb.util.generate_id()}",
+        tags=["training", "ResAD", "baseline"],  # Add relevant tags
     )
-
-    # Initialize Metrics Handler
-    metrics_handler = MetricsHandler(
-        experiment_dir=saver.get_experiment_dir(),
-        log_dir=config.log_dir
-    )
-
-    # Configure cuDNN
-    cudnn.benchmark = True  # Enable benchmark mode for optimized performance
 
     # Load datasets
-    train_dataset = OASISKaggle(split='train', transform=config.transform)
-    val_dataset = OASISKaggle(split='test', transform=config.transform)
+    train_dataset = OASISKaggle(split='train')
+    val_dataset = OASISKaggle(split='test')
 
     # Calculate class weights for handling class imbalance
     train_labels = np.array(train_dataset.binary_labels)
@@ -81,20 +93,22 @@ def main():
         pin_memory=config.pin_memory
     )
 
-    # Initialize model using the Model Factory
-    model = get_default_model()
-    logger.info(f'Model "{config.model_name}" initialized on device: {config.device}')
+    # Initialize model
+    model = get_default_model().to(config.device)
 
     # Watch the model (logs gradients and model graph)
     wandb.watch(model, log="all")
 
-    # Define loss function and optimizer
+    # Define loss function
+    alpha = class_weights.tolist()  # Assuming FocalLoss supports per-class alpha
     criterion = FocalLoss(
-        alpha=class_weights[1].item(),
+        alpha=alpha,                 # List of class weights
         gamma=config.focal_gamma,
         logits=True,
         reduce=True
     )
+
+    # Define optimizer
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=1e-4)
 
     # Define learning rate scheduler
@@ -195,7 +209,7 @@ def main():
             "Learning Rate": optimizer.param_groups[0]['lr'],
         })
 
-        # Reset metrics for next epoch
+        # Reset metrics
         accuracy_metric.reset()
         precision_metric.reset()
         recall_metric.reset()
@@ -220,6 +234,7 @@ def main():
             artifact.add_file(saved_model_path)
             wandb.log_artifact(artifact)
 
+            # Log best metrics as run summary
             wandb.run.summary["best_val_loss"] = best_loss
             wandb.run.summary["best_val_f1"] = val_f1.item()
         else:
@@ -228,7 +243,7 @@ def main():
                 wandb.log({"Early Stopping": True})
                 break
 
-    # Load the best model weights
+    # Load the best model weights after training
     model.load_state_dict(best_model_wts)
     final_model_path = os.path.join(config.model_dir, f"ResAD_final_bestLoss_{best_loss:.4f}.pth")
     torch.save(model.state_dict(), final_model_path)

@@ -2,7 +2,7 @@ import importlib
 import torch
 import re
 import os
-from configs.config import Config
+from config import Config
 
 def extract_model_name(model_path):
     """
