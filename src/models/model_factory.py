@@ -81,7 +81,6 @@ def get_default_model():
     """
     config = Config()
     model_name = config.model_name
-    model_params = config.model_params.get(model_name, {})
     module = importlib.import_module(f"models.{model_name.lower()}")
     model_class = getattr(module, model_name)
     model = model_class()
