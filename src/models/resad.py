@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from torchvision.models import resnet18, ResNet18_Weights
 
@@ -40,3 +39,15 @@ class ResAD(nn.Module):
     def forward(self, x):
         x = self.base_model(x)
         return x
+
+def get_default_model(**kwargs):
+    """
+    Factory function to get the default model.
+
+    Args:
+        **kwargs: Model configuration parameters.
+
+    Returns:
+        torch.nn.Module: The instantiated model.
+    """
+    return ResAD(**kwargs)

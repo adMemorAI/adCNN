@@ -1,9 +1,8 @@
-Data/
-data/
-dataset/
 datasets/
 __*
+artifacts
+initialized_model.pth
+./models
 
 images
 wandb*
-*Zone.identifier

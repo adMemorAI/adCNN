@@ -1,0 +1,38 @@
+# config.yaml
+
+device: "cuda"  # or "cpu"
+num_workers: 4
+pin_memory: true
+model_dir: "./models"
+
+model_params:
+  freeze_layers: true
+  dropout_p: 0.5
+
+train_params:
+  batch_size: 128
+  num_epochs: 10
+  early_stopping_patience: 5
+  optimizer: "Adam"
+  learning_rate: 0.001
+  focal_gamma: 2.0
+  scheduler_factor: 0.1
+  scheduler_patience: 3
+
+evaluate_params:
+  focal_gamma: 2.0
+  k_hard_examples: 32
+
+transform:
+  resize: [224, 224]
+  grayscale: 1  
+  horizontal_flip: 0.5  
+  rotation: 15 
+  color_jitter:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+  normalize:
+    mean: [0.485]
+    std: [0.229]

@@ -1,13 +1,14 @@
 name: adCNN
 channels:
-  - defaults
-  - pytorch
+ - pytorch
+ - nvidia
+ - defaults
 dependencies:
-  - python=3.9
-  - pytorch=2.4
-  - torchvision=0.19
+  - python
+  - pytorch
+  - torchvision
   - torchmetrics
-  - cudatoolkit
+  - pytorch-cuda=12.4
   - tqdm
   - numpy
   - pandas
@@ -20,3 +21,4 @@ dependencies:
       - nibabel
       - kaggle
       - wandb
+      - tamllint

@@ -7,7 +7,7 @@ import re
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 
-from config import Config
+from utils.config import load_config
 
 class OASISKaggle(Dataset):
     _train_patient_ids = None
@@ -50,17 +50,16 @@ class OASISKaggle(Dataset):
 
         Args:
             split (str): One of 'train', 'test', or 'all'.
-            transform (callable, optional): Transform to apply to images.
             test_size (float): Fraction of data to use for testing.
             random_seed (int): Seed for reproducibility.
         """
-        config = Config()
+        config = load_config()
 
         project_root = Path(__file__).parent.parent.parent
-        dataset_dir = os.path.join(project_root, "datasets") # expected path: /adCNN/datasets
+        dataset_dir = os.path.join(project_root, "datasets")  # expected path: /adCNN/datasets
         self.path = os.path.join(dataset_dir, "oasis_kaggle")
         self.split = split
-        self.transform = config.transform
+        self.transform = config.get('transform', None)
 
         # Create the reference DataFrame
         self.df = self.create_ref_df(self.path)
@@ -118,6 +117,8 @@ class OASISKaggle(Dataset):
         Returns:
             pd.DataFrame: DataFrame containing 'path', 'label', and 'patient_id'.
         """
+        import pandas as pd
+
         paths, labels, patient_ids = [], [], []
         # Define class directories
         classes = ['no-dementia', 'verymild-dementia', 'mild-dementia', 'moderate-dementia']
