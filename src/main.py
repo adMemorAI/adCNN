@@ -1,3 +1,5 @@
+# src/main.py
+
 import argparse
 import os
 import wandb
@@ -20,6 +22,8 @@ def main():
     parser.add_argument('--focal_gamma', type=float, help="Focal loss gamma")
     parser.add_argument('--learning_rate', type=float, help="Learning rate for optimizer")
     parser.add_argument('--optimizer', type=str, choices=['Adam', 'SGD'], help="Optimizer type")
+    parser.add_argument('--model_type', type=str, help="Type of the model to use")
+    parser.add_argument('--dataset_type', type=str, help="Type of the dataset to use")
     
     args = parser.parse_args()
 
@@ -27,12 +31,18 @@ def main():
     config = load_config()
 
     # Override config with command-line arguments if provided
+    if args.model_type is not None:
+        config['model']['type'] = args.model_type
+    if args.dataset_type is not None:
+        config['dataset']['type'] = args.dataset_type
     if args.batch_size is not None:
-        config['model_params']['batch_size'] = args.batch_size
+        config['train_params']['batch_size'] = args.batch_size
+        config['model']['params']['batch_size'] = args.batch_size
     if args.dropout is not None:
-        config['model_params']['dropout_p'] = args.dropout
+        config['model']['params']['dropout_p'] = args.dropout
     if args.focal_gamma is not None:
         config['train_params']['focal_gamma'] = args.focal_gamma
+        config['evaluate_params']['focal_gamma'] = args.focal_gamma
     if args.learning_rate is not None:
         config['train_params']['learning_rate'] = args.learning_rate
     if args.optimizer is not None:

@@ -1,9 +1,11 @@
-import numpy as np
+# data_loader.py
+
 import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
 import wandb
+import numpy as np
 
-from dsets.oasis_kaggle import OASISKaggle
+from dsets.dataset_factory import get_dataset
 from utils.metrics import compute_class_weights
 
 def get_data_loaders(config):
@@ -16,9 +18,19 @@ def get_data_loaders(config):
     Returns:
         tuple: (train_loader, val_loader, class_weights)
     """
-    # Initialize datasets with internal splits
-    train_dataset = OASISKaggle(split='train')
-    val_dataset = OASISKaggle(split='test')
+    # Initialize datasets with internal splits and transforms
+    train_dataset = get_dataset(
+        dataset_type=config['dataset']['type'],
+        split='train',
+        transform=config['transform'],
+        **config['dataset']['params']
+    )
+    test_dataset = get_dataset(
+        dataset_type=config['dataset']['type'],
+        split='test',
+        transform=config['transform'],
+        **config['dataset']['params']
+    )
 
     # Compute class weights based on training labels
     train_labels = np.array(train_dataset.binary_labels)
@@ -39,7 +51,7 @@ def get_data_loaders(config):
         pin_memory=config['pin_memory']
     )
     val_loader = DataLoader(
-        val_dataset,
+        test_dataset,
         batch_size=config['train_params']['batch_size'],
         shuffle=False,
         num_workers=config['num_workers'],
