@@ -1,8 +1,8 @@
-datasets/
-__*
+models
+datasets
 artifacts
+__pycache__
 initialized_model.pth
-./models
 
 images
-wandb*
+wandb

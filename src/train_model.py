@@ -1,3 +1,4 @@
+# train_model.py
 
 import os
 import torch
@@ -12,10 +13,23 @@ import wandb
 from utils.config import load_config
 from utils.data_loader import get_data_loaders
 from utils.metrics import get_metrics
-import models.resad as resad
+from models.model_factory import get_model
 from utils.wandb_utils import setup_wandb_run
 from utils.model_utils import save_and_log_model
 from losses.focal_loss import FocalLoss
+
+# src/train_model.py
+
+import torch
+import wandb
+import os
+import logging
+import copy
+from models.model_factory import get_model
+from utils.data_loader import get_data_loaders
+from utils.model_utils import save_and_log_model  # Ensure this utility exists
+
+logger = logging.getLogger(__name__)
 
 def train_model(config):
     """
@@ -23,17 +37,20 @@ def train_model(config):
     """
     with setup_wandb_run(config, job_type="train") as run:
         # Use the initialized model artifact
-        model_artifact = run.use_artifact("initialized_model:latest")
+        model_artifact = run.use_artifact("initialized_model:latest", type="model")
         model_dir = model_artifact.download()
         model_path = os.path.join(model_dir, "initialized_model.pth")
         model_config = model_artifact.metadata
 
-        # Update config with model parameters
-        config['model_params'] = model_config
+        # Update config with model parameters from artifact
+        config['model']['params'].update(model_config.get('model_params', {}))
 
-        # Initialize the model
-        model = resad.get_default_model(**model_config)
-        model.load_state_dict(torch.load(model_path))
+        # Initialize the model using the factory
+        model = get_model(
+            model_type=config['model']['type'],
+            **config['model']['params']
+        )
+        model.load_state_dict(torch.load(model_path, weights_only=True))
         model = model.to(config['device'])
 
         # Watch the model with W&B
@@ -96,9 +113,6 @@ def train_model(config):
                 best_model_wts = copy.deepcopy(model.state_dict())
                 epochs_no_improve = 0
 
-                # Save and log the best model
-                save_and_log_model(model, config, run, best_loss, "best_model")
-                
                 # Log best metrics
                 run.summary["best_val_loss"] = best_loss
                 run.summary["best_val_f1"] = val_metrics.get("F1-Score", None)
@@ -106,16 +120,16 @@ def train_model(config):
                 epochs_no_improve += 1
                 if epochs_no_improve >= config['train_params']['early_stopping_patience']:
                     wandb.log({"Early Stopping": True})
-                    print("Early stopping triggered.")
+                    logger.info("Early stopping triggered.")
                     break
 
         # Load the best model weights
-        model.load_state_dict(best_model_wts, weights_only=True)
+        model.load_state_dict(best_model_wts)
 
-        # Save and log the final model
+        # Save and log the final (best) model
         save_and_log_model(model, config, run, best_loss, "final_model")
 
-        print("Training complete. Final model saved and logged.")
+        logger.info("Training complete. Final model saved and logged.")
 
 def get_optimizer(config, model):
     """
