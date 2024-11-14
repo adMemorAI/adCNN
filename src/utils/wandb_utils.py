@@ -15,7 +15,7 @@ def setup_wandb_run(config, job_type):
     Returns:
         wandb.run: The initialized W&B run.
     """
-    run = wandb.init(project="adCNN-src", job_type=job_type, config=config)
+    run = wandb.init(project=config.get('wandb_project', 'adCNN-src'), job_type=job_type, config=config)
     run.config.update({
         "git_commit": get_git_commit(),
         "device": config['device'],  # Removed '.type' attribute

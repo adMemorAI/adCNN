@@ -5,7 +5,6 @@ from PIL import Image
 import pandas as pd
 import re
 from sklearn.model_selection import train_test_split
-from pathlib import Path
 
 from utils.config import load_config
 
@@ -44,7 +43,7 @@ class OASISKaggle(Dataset):
             cls._train_patient_ids = train_ids
             cls._test_patient_ids = test_ids
 
-    def __init__(self, split='train', test_size=0.2, random_seed=42):
+    def __init__(self, split='train', test_size=0.2, random_seed=42, transform=None):
         """
         Initializes the dataset.
 
@@ -55,9 +54,7 @@ class OASISKaggle(Dataset):
         """
         config = load_config()
 
-        project_root = Path(__file__).parent.parent.parent
-        dataset_dir = os.path.join(project_root, "datasets")  # expected path: /adCNN/datasets
-        self.path = os.path.join(dataset_dir, "oasis_kaggle")
+        self.path = os.path.join(config['project_root'], config['datasets']['oasis_kaggle']['data_dir'])  # expected path: /adCNN/datasets
         self.split = split
         self.transform = config.get('transform', None)
 

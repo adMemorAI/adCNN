@@ -1,162 +1,208 @@
-# src/evaluate_model.py
+# evaluate_model.py
 
 import logging
-import os
-from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
-import wandb  # Import W&B
+import wandb
+from tqdm import tqdm
+import heapq
+
+from dsets.oasis_kaggle import OASISKaggle
+from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
 
 from utils.config import load_config
 from utils.data_loader import get_data_loaders
+from dsets.dataset_factory import get_dataset
 from utils.metrics import get_metrics
 from models.model_factory import get_model
 from losses.focal_loss import FocalLoss
+from utils.model_utils import get_model_path
 
 logger = logging.getLogger(__name__)
 
 def evaluate_model(config):
     """
-    Evaluate the trained model on the validation dataset.
+    Evaluate the trained model on the test dataset and log the k hardest examples of each class to a W&B table.
     """
-    # Initialize W&B run
-    wandb.init(project=config.get('wandb_project', 'adCNN'), job_type="evaluate")
-    
-    # Define table columns
-    columns = ["id", "image", "guess", "truth", "score_0", "score_1"]
-    
-    # Initialize the table
-    prediction_table = wandb.Table(columns=columns)
-    
-    # Set the maximum number of images to log
-    max_images = 100  # Adjust based on your preference
-    
-    # Load the final model artifact
+    # Initialize W&B run if not already active
+    if wandb.run is None:
+        wandb.init(project=config.get('wandb_project', 'adCNN'), job_type="evaluate", config=config)
+        run = wandb.run
+        should_finish = True
+    else:
+        run = wandb.run
+        should_finish = False
+
     try:
-        model_artifact = wandb.use_artifact("final_model:latest", type="model")
-        model_artifact_dir = model_artifact.download()
-        model_path = os.path.join(model_artifact_dir, 'final_model.pth')
-        logger.info(f"Model artifact downloaded to {model_path}")
-    except wandb.CommError as e:
-        logger.error(f"Error fetching artifact: {e}")
-        raise e
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        raise e
+        # Load the trained model artifact
+        trained_model_artifact = run.use_artifact("trained_model:latest", type="model")
+        model_dir = trained_model_artifact.download()
+        model_path = get_model_path(model_dir, pattern="trained_model.pth")
 
-    # Initialize the model
-    model = get_model(config['model']['type'], **config['model']['params'])
-    model.load_state_dict(torch.load(model_path))
-    model.to(config['device'])
+        if not model_path:
+            logger.error("Trained model file not found in the artifact.")
+            raise FileNotFoundError("Trained model file not found in the artifact.")
 
-    # Get data loaders and class weights
-    _, val_loader, _ = get_data_loaders(config)
+        # Initialize the model
+        model = get_model(config['model']['type'], **config['model']['params'])
+        model.load_state_dict(torch.load(model_path, map_location=config['device'], weights_only=True))
+        model = model.to(config['device'])
+        model.eval()
 
-    # Define loss function and metrics
-    criterion = FocalLoss(
-        alpha=[1.0, 1.0],  # Binary classification: [alpha_non_dementia, alpha_dementia]
-        gamma=config['evaluate_params']['focal_gamma'],
-        logits=True,
-        reduce=True
-    )
-    metrics = get_metrics(config['device'])  # Ensure this function is correctly implemented
-
-    # Perform evaluation
-    try:
-        average_loss, average_accuracy, f1, precision, recall, conf_matrix = evaluate(
-            model, val_loader, criterion, metrics, config['device'], prediction_table, max_images
+        # Load the test dataset
+        test_dataset = get_dataset(
+            dataset_type=config['datasets']['type'],
+            split='test',
+            transform=config['transform']
         )
-    except Exception as e:
-        logger.error(f"Error during evaluation: {e}")
-        raise e
 
-    # Log metrics and table to W&B
-    wandb.log({
-        "Evaluation Loss": average_loss,
-        "Evaluation Accuracy": average_accuracy,
-        "Evaluation F1-Score": f1,
-        "Evaluation Precision": precision,
-        "Evaluation Recall": recall,
-        "Confusion Matrix": wandb.plot.confusion_matrix(
-            probs=None,
-            y_true=true_labels,
-            preds=predictions,
-            class_names=["Non-Dementia", "Dementia"]
-        ),
-        "Predictions Table": prediction_table
-    })
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=config['train_params']['batch_size'],
+            shuffle=False,
+            num_workers=config['num_workers'],
+            pin_memory=config['pin_memory']
+        )
 
-    logger.info("Evaluation complete. Metrics and predictions logged to W&B.")
+        # Log class distribution in the test set
+        labels = test_dataset.binary_labels
+        class_counts = np.bincount(labels)
+        print(f"Test Set Class Distribution: {class_counts}")
+        run.summary.update({
+            "Test_No_Dementia": int(class_counts[0]),
+            "Test_Dementia": int(class_counts[1])
+        })
 
-    # Finish the W&B run
-    wandb.finish()
+        # Define the loss function with per-sample loss
+        criterion = FocalLoss(
+            alpha=config.get('model', {}).get('params', {}).get('alpha', None),
+            gamma=config['train_params']['focal_gamma'],
+            logits=True,
+        )
 
-def evaluate(model, dataloader, criterion, metrics, device, prediction_table=None, max_images=100):
-    model.eval()
-    losses = []
-    accuracies = []
-    predictions = []
-    true_labels = []
-    image_counter = 0  # To limit the number of images logged
-    
-    with torch.no_grad():
-        for batch_idx, (inputs, labels) in enumerate(dataloader):
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-            labels = labels.unsqueeze(1).float()  # Ensure labels are [batch_size, 1] and float
-            
-            outputs = model(inputs)  # [batch_size, 1]
-            loss = criterion(outputs, labels)
-            preds = (outputs > 0).float()  # Binary predictions (0 or 1)
-            
-            # Compute probabilities
-            probs = torch.sigmoid(outputs)
-            p1 = probs.squeeze(1)
-            p0 = 1 - p1
-            
-            # Populate W&B table
-            if prediction_table is not None and image_counter < max_images:
-                images = inputs.cpu().numpy()
-                labels_np = labels.cpu().numpy()
-                preds_np = preds.cpu().numpy()
-                p0_np = p0.cpu().numpy()
-                p1_np = p1.cpu().numpy()
-                
-                for i in range(inputs.size(0)):
-                    if image_counter >= max_images:
-                        break
-                    # Convert image for visualization
-                    img = images[i].squeeze()  # [1, H, W] -> [H, W]
-                    wandb_img = wandb.Image(img, caption=f"Truth: {int(labels_np[i][0])}, Pred: {int(preds_np[i][0])}")
-                    
-                    label = int(labels_np[i][0])
-                    pred = int(preds_np[i][0])
-                    score0 = float(p0_np[i])
-                    score1 = float(p1_np[i])
-                    row_id = f"{batch_idx}_{i}"
-                    
-                    # Add row to the table
-                    prediction_table.add_data(row_id, wandb_img, pred, label, score0, score1)
-                    image_counter += 1
-            
-            losses.append(loss.detach().cpu().numpy())
-            accuracies.append(torch.sum(preds == labels).item() / labels.size(0))
-            predictions.extend(preds.detach().cpu().numpy())
-            true_labels.extend(labels.detach().cpu().numpy())
-    
-    # Convert lists to numpy arrays
-    losses = np.array(losses)
-    accuracies = np.array(accuracies)
-    predictions = np.array(predictions)
-    true_labels = np.array(true_labels)
-    
-    # Calculate overall metrics
-    average_loss = losses.mean()
-    average_accuracy = accuracies.mean()
-    f1 = f1_score(true_labels, predictions, average='weighted')
-    precision = precision_score(true_labels, predictions, average='weighted')
-    recall = recall_score(true_labels, predictions, average='weighted')
-    conf_matrix = confusion_matrix(true_labels, predictions)
-    
-    return average_loss, average_accuracy, f1, precision, recall, conf_matrix
+        # Define metrics
+        metrics = get_metrics(config['device'])
+
+        # Initialize W&B Table for Hardest Test Examples
+        table = wandb.Table(columns=["ID", "Image", "Prediction", "True Label", "Loss"])
+
+        # Initialize tracking variables
+        total_loss = 0.0
+        correct_predictions = 0
+        total_samples = 0
+        all_predictions = []
+        all_true_labels = []
+
+        # Retrieve the number of hardest examples to log per class
+        k = config.get('evaluate_params', {}).get('k_hard_examples', 10)
+        hardest_examples = {0: [], 1: []}  # Assuming binary classification
+
+        # Evaluate the model on the test set
+        with torch.no_grad():
+            for batch_idx, (images, labels_batch) in enumerate(tqdm(test_loader, desc='Evaluating', leave=False, unit='batch')):
+                images = images.to(config['device'], non_blocking=True)
+                labels_batch = labels_batch.to(config['device']).unsqueeze(1).float()
+
+                outputs = model(images)
+                per_sample_loss = criterion(outputs, labels_batch).detach().cpu().numpy().flatten()
+                loss = per_sample_loss.mean()  # Mean loss for the batch
+                probabilities = torch.sigmoid(outputs)
+                preds = (probabilities >= 0.5).float()
+
+                # Convert predictions and labels to integers and extend the lists
+                all_predictions.extend(preds.cpu().int().numpy().flatten().tolist())
+                all_true_labels.extend(labels_batch.cpu().int().numpy().flatten().tolist())
+
+                # Update tracking variables
+                total_loss += loss.item() * images.size(0)  # Total loss accumulates batch loss multiplied by batch size
+                correct_predictions += (preds == labels_batch).sum().item()
+                total_samples += images.size(0)
+
+                # Iterate through each sample in the batch to identify hardest examples
+                for i in range(images.size(0)):
+                    if i >= len(per_sample_loss):
+                        logger.warning(f"Batch {batch_idx}: Attempting to access per_sample_loss[{i}] with size {len(per_sample_loss)}")
+                        continue  # Skip this sample
+
+                    true_label = int(labels_batch[i].cpu().numpy())
+                    loss_val = float(per_sample_loss[i])
+                    pred = int(preds[i].cpu().numpy())
+
+                    # Use a min-heap to keep top k hardest (highest loss) examples per class
+                    if len(hardest_examples[true_label]) < k:
+                        heapq.heappush(hardest_examples[true_label], (loss_val, batch_idx, i, images[i].cpu().numpy(), pred))
+                    else:
+                        if loss_val > hardest_examples[true_label][0][0]:
+                            heapq.heappushpop(hardest_examples[true_label], (loss_val, batch_idx, i, images[i].cpu().numpy(), pred))
+
+        # After evaluation, collect and sort the hardest examples for each class
+        for class_label, examples in hardest_examples.items():
+            # Sort examples by loss in descending order
+            sorted_examples = sorted(examples, key=lambda x: x[0], reverse=True)
+            for example in sorted_examples:
+                loss_val, batch_idx, i, img, pred = example
+                true_label = class_label
+                row_id = f"{class_label}_{batch_idx}_{i}"
+
+                # Process the image (assuming single-channel)
+                img_processed = img.squeeze()
+                table.add_data(
+                    row_id,
+                    wandb.Image(img_processed, caption=f"Pred: {pred}, True: {true_label}"),
+                    pred,
+                    true_label,
+                    loss_val
+                )
+
+        # Calculate average loss and accuracy
+        avg_loss = total_loss / total_samples
+        accuracy = (correct_predictions / total_samples) * 100
+
+        # Calculate additional metrics
+        f1 = f1_score(all_true_labels, all_predictions, average='weighted')
+        precision = precision_score(all_true_labels, all_predictions, average='weighted')
+        recall = recall_score(all_true_labels, all_predictions, average='weighted')
+        conf_matrix = confusion_matrix(all_true_labels, all_predictions)
+
+
+        unique_preds = set(all_predictions)
+        unique_true = set(all_true_labels)
+
+        wandb.log({
+            "Unique Predictions": wandb.Histogram(list(unique_preds)),
+            "Unique True Labels": wandb.Histogram(list(unique_true)),
+        })
+
+        # Check if number of unique predictions exceeds number of class names
+        if len(unique_preds) > len(["No Dementia", "Dementia"]):
+            logger.error(f"Number of unique predictions ({len(unique_preds)}) exceeds number of class names (2). Skipping confusion matrix.")
+        else:
+            # Log the metrics to W&B
+            wandb.log({
+                "Average Loss": avg_loss,
+                "Accuracy (%)": accuracy,
+                "F1 Score": f1,
+                "Precision": precision,
+                "Recall": recall,
+                "Confusion Matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=all_true_labels,
+                    preds=all_predictions,
+                    class_names=["No Dementia", "Dementia"]
+                ),
+                "Hardest Test Examples Table": table
+            })
+
+        print("Evaluation complete. Metrics and hardest test examples logged to W&B.")
+
+    finally:
+        # Finish the W&B run if it was started here
+        if should_finish:
+            wandb.finish()
+
+if __name__ == "__main__":
+    # Example usage
+    config = load_config('path_to_config.yaml')  # Replace with your config path
+    evaluate_model(config)
+

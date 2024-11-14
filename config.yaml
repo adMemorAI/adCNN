@@ -1,3 +1,6 @@
+wandb_project: "adCNN-src"
+project_root: "." # Path to the project root, changed at runtime to absolute path
+
 device: "cuda"  # or "cpu"
 num_workers: 4
 pin_memory: true
@@ -11,10 +14,11 @@ model:
     dropout_p: 0.5
 
 # Dataset Configuration
-dataset:
+datasets:
   type: "OASISKaggle"  # Default dataset
-  params:
-    data_dir: "./datasets/oasis_kaggle"
+  oasis_kaggle: 
+    class_name: "OASISKaggle"  # Default dataset
+    data_dir: "datasets/oasis_kaggle" # Path to the dataset from the project root
 
 train_params:
   batch_size: 128

@@ -3,6 +3,7 @@ import yaml
 import os
 import wandb
 from torchvision import transforms
+from pathlib import Path
 
 def load_config(config_path="config.yaml"):
     """
@@ -24,6 +25,8 @@ def load_config(config_path="config.yaml"):
     if wandb.run and wandb.run.config:
         wandb_config = dict(wandb.run.config)  # Correctly convert to a dict
         config = merge_configs(config, wandb_config)
+
+    config['project_root'] = Path(__file__).parent.parent.parent
 
     # Build the transform based on config
     config['transform'] = build_transform(config.get('transform', {}))

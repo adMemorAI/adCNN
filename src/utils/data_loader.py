@@ -20,16 +20,14 @@ def get_data_loaders(config):
     """
     # Initialize datasets with internal splits and transforms
     train_dataset = get_dataset(
-        dataset_type=config['dataset']['type'],
+        dataset_type=config['datasets']['type'],
         split='train',
-        transform=config['transform'],
-        **config['dataset']['params']
+        transform=config['transform']
     )
     test_dataset = get_dataset(
-        dataset_type=config['dataset']['type'],
+        dataset_type=config['datasets']['type'],
         split='test',
-        transform=config['transform'],
-        **config['dataset']['params']
+        transform=config['transform']
     )
 
     # Compute class weights based on training labels
@@ -50,7 +48,7 @@ def get_data_loaders(config):
         num_workers=config['num_workers'],
         pin_memory=config['pin_memory']
     )
-    val_loader = DataLoader(
+    test_loader = DataLoader(
         test_dataset,
         batch_size=config['train_params']['batch_size'],
         shuffle=False,
@@ -58,7 +56,7 @@ def get_data_loaders(config):
         pin_memory=config['pin_memory']
     )
 
-    return train_loader, val_loader, class_weights
+    return train_loader, test_loader, class_weights
 
 def create_weighted_sampler(class_weights, labels):
     """

@@ -1,7 +1,7 @@
 # dataset_factory.py
 
 from utils.factory_utils import filter_kwargs
-from datasets.oasis_kaggle import OASISKaggle
+from dsets.oasis_kaggle import OASISKaggle
 import inspect
 import warnings
 

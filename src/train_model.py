@@ -4,7 +4,6 @@ import os
 import torch
 import torch.optim as optim
 import copy
-import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
@@ -14,20 +13,10 @@ from utils.config import load_config
 from utils.data_loader import get_data_loaders
 from utils.metrics import get_metrics
 from models.model_factory import get_model
-from utils.wandb_utils import setup_wandb_run
-from utils.model_utils import save_and_log_model
+from utils.model_utils import save_and_log_model, get_model_path
 from losses.focal_loss import FocalLoss
 
-# src/train_model.py
-
-import torch
-import wandb
-import os
 import logging
-import copy
-from models.model_factory import get_model
-from utils.data_loader import get_data_loaders
-from utils.model_utils import save_and_log_model  # Ensure this utility exists
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +24,27 @@ def train_model(config):
     """
     Train the model using the initialized artifact and log the trained model.
     """
-    with setup_wandb_run(config, job_type="train") as run:
+    # Check if a W&B run is already active
+    if wandb.run is None:
+        # Initialize W&B run if not already active
+        wandb.init(project=config.get('wandb_project', 'adCNN'), job_type="train", config=config)
+        run = wandb.run
+        should_finish = True
+    else:
+        # Use the existing run
+        run = wandb.run
+        should_finish = False
+
+    try:
         # Use the initialized model artifact
         model_artifact = run.use_artifact("initialized_model:latest", type="model")
         model_dir = model_artifact.download()
-        model_path = os.path.join(model_dir, "initialized_model.pth")
+        model_path = get_model_path(model_dir, pattern="initialized_model.pth")
         model_config = model_artifact.metadata
+
+        if not model_path:
+            logger.error("Initial model file not found in the artifact.")
+            raise FileNotFoundError("Initial model file not found in the artifact.")
 
         # Update config with model parameters from artifact
         config['model']['params'].update(model_config.get('model_params', {}))
@@ -50,7 +54,7 @@ def train_model(config):
             model_type=config['model']['type'],
             **config['model']['params']
         )
-        model.load_state_dict(torch.load(model_path, weights_only=True))
+        model.load_state_dict(torch.load(model_path, map_location=config['device'], weights_only=True))
         model = model.to(config['device'])
 
         # Watch the model with W&B
@@ -64,7 +68,7 @@ def train_model(config):
             alpha=class_weights.tolist(),  # List of class weights
             gamma=config['train_params']['focal_gamma'],
             logits=True,
-            reduce=True
+            reduction='mean'
         )
 
         # Define optimizer
@@ -87,7 +91,8 @@ def train_model(config):
         epochs_no_improve = 0
 
         # Training loop
-        for epoch in range(config['train_params']['num_epochs']):
+        num_epochs = config['train_params']['num_epochs']
+        for epoch in range(num_epochs):
             wandb.log({"Epoch": epoch + 1})
 
             # Training Phase
@@ -127,9 +132,14 @@ def train_model(config):
         model.load_state_dict(best_model_wts)
 
         # Save and log the final (best) model
-        save_and_log_model(model, config, run, best_loss, "final_model")
+        save_and_log_model(model, config, run, best_loss, "trained_model")
 
         logger.info("Training complete. Final model saved and logged.")
+
+    finally:
+        # Finish the W&B run if it was started here
+        if should_finish:
+            wandb.finish()
 
 def get_optimizer(config, model):
     """

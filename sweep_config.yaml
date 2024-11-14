@@ -26,4 +26,4 @@ command:
   - python
   - src/main.py
   - --step
-  - train
+  - full

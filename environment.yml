@@ -8,7 +8,7 @@ dependencies:
   - pytorch
   - torchvision
   - torchmetrics
-  - pytorch-cuda=12.4
+  - pytorch-cuda
   - tqdm
   - numpy
   - pandas
@@ -21,4 +21,3 @@ dependencies:
       - nibabel
       - kaggle
       - wandb
-      - tamllint
