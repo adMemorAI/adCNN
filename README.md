@@ -11,6 +11,8 @@
 7. Project Structure
 8. Usage
 
+
+
 ## Project Overview
 
 This project aims to build a robust neural network system to classify whether a person has Alzheimer's disease based on MRI scan slices. By utilizing different datasets and models, the project seeks to find the most accurate approach for Alzheimer's recognition.
@@ -26,27 +28,25 @@ This project aims to build a robust neural network system to classify whether a 
 
 1. **Clone the Repository**
 
-   Clone the repository from GitHub and navigate into the project directory.
+   `git clone https://github.com/yourusername/alzheimer-recognition.git`
+
+   `cd alzheimer-recognition`
 
 2. **Create a Virtual Environment**
 
-   Create and activate a virtual environment for managing dependencies.
+   `python3 -m venv venv`
+
+   `source venv/bin/activate`  (On Windows: `venv\Scripts\activate`)
 
 3. **Install Dependencies**
 
-   Install the required packages listed in the `requirements.txt` file:
-
-   ```
-   pip install -r requirements.txt
-   ```
+   `pip install -r requirements.txt`
 
 4. **Setup Weights & Biases**
 
    Sign up for a free account at Weights & Biases and log in:
 
-   ```
-   wandb login
-   ```
+   `wandb login`
 
 ## Dataset Structure
 
@@ -100,15 +100,11 @@ Using Weights & Biases (W&B), you can perform hyperparameter sweeps to find the 
 
 1. **Initialize the Sweep**
 
-   ```
-   wandb sweep sweep_config.yaml
-   ```
+   `wandb sweep sweep_config.yaml`
 
 2. **Start the Sweep Agents**
 
-   ```
-   wandb agent your-sweep-id
-   ```
+   `wandb agent your-sweep-id`
 
    Replace `your-sweep-id` with the ID returned after initializing the sweep.
 
@@ -162,3 +158,6 @@ datasets/
 
 To start training with the default configuration:
 
+`python src/main.py --step train`
+
+##
