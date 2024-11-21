@@ -1,5 +1,7 @@
+# config.yaml
+
 wandb_project: "adCNN-src"
-project_root: "." # Path to the project root, changed at runtime to absolute path
+project_root: "."  # Path to the project root, changed at runtime to absolute path
 
 device: "cuda"  # or "cpu"
 num_workers: 4
@@ -8,17 +10,32 @@ model_dir: "./models"
 
 # Model Configuration
 model:
-  type: "ResAD"  # Default model
+  type: "CvT"  # Default model; can be overridden by sweep
   params:
     freeze_layers: true
     dropout_p: 0.5
+    # CvT-specific parameters
+    image_size: 256
+    in_channels: 1  # Set to 1 for grayscale images
+    num_classes: 1  # Binary classification
+    dim: 64
+    kernels: [7, 3, 3]
+    strides: [4, 2, 2]
+    heads: [1, 3, 6]
+    depth: [1, 2, 10]
+    pool: "cls"
+    emb_dropout: 0.1
+    scale_dim: 4
 
 # Dataset Configuration
 datasets:
-  type: "OASISKaggle"  # Default dataset
+  type: "OASISKaggle"  # Default dataset; can be overridden by sweep
   oasis_kaggle: 
-    class_name: "OASISKaggle"  # Default dataset
-    data_dir: "datasets/oasis_kaggle" # Path to the dataset from the project root
+    class_name: "OASISKaggle"  # Existing dataset
+    data_dir: "datasets/oasis_kaggle"  # Path to the OASISKaggle dataset from the project root
+  adni:
+    class_name: "ADNI"  # New ADNI dataset
+    data_dir: "datasets/adni"  # Path to the ADNI dataset from the project root
 
 train_params:
   batch_size: 128
@@ -35,7 +52,7 @@ evaluate_params:
   k_hard_examples: 32
 
 transform:
-  resize: [224, 224]
+  resize: [256, 256]
   grayscale: 1  
   horizontal_flip: 0.5  
   rotation: 15 
@@ -45,5 +62,6 @@ transform:
     saturation: 0.2
     hue: 0.1
   normalize:
-    mean: [0.485]
-    std: [0.229]
+    mean: [0.485]  # Single mean for grayscale
+    std: [0.229]   # Single std for grayscale
+

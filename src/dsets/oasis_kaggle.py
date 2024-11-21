@@ -43,7 +43,7 @@ class OASISKaggle(Dataset):
             cls._train_patient_ids = train_ids
             cls._test_patient_ids = test_ids
 
-    def __init__(self, split='train', test_size=0.2, random_seed=42, transform=None):
+    def __init__(self, config, split='train', test_size=0.2, random_seed=42):
         """
         Initializes the dataset.
 
@@ -52,11 +52,11 @@ class OASISKaggle(Dataset):
             test_size (float): Fraction of data to use for testing.
             random_seed (int): Seed for reproducibility.
         """
-        config = load_config()
 
         self.path = os.path.join(config['project_root'], config['datasets']['oasis_kaggle']['data_dir'])  # expected path: /adCNN/datasets
         self.split = split
-        self.transform = config.get('transform', None)
+        self.transform = config['transform']
+        print(f'transform = {self.transform}')
 
         # Create the reference DataFrame
         self.df = self.create_ref_df(self.path)

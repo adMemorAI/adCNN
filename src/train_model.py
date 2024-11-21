@@ -9,11 +9,10 @@ from torch.utils.data import DataLoader
 
 import wandb
 
-from utils.config import load_config
 from utils.data_loader import get_data_loaders
 from utils.metrics import get_metrics
 from models.model_factory import get_model
-from utils.model_utils import save_and_log_model, get_model_path
+from utils.model_utils import save_and_log_model
 from losses.focal_loss import FocalLoss
 
 import logging
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def train_model(config):
     """
-    Train the model using the initialized artifact and log the trained model.
+    Initialize and train the model, then log the trained model to W&B.
     """
     # Check if a W&B run is already active
     if wandb.run is None:
@@ -36,25 +35,11 @@ def train_model(config):
         should_finish = False
 
     try:
-        # Use the initialized model artifact
-        model_artifact = run.use_artifact("initialized_model:latest", type="model")
-        model_dir = model_artifact.download()
-        model_path = get_model_path(model_dir, pattern="initialized_model.pth")
-        model_config = model_artifact.metadata
-
-        if not model_path:
-            logger.error("Initial model file not found in the artifact.")
-            raise FileNotFoundError("Initial model file not found in the artifact.")
-
-        # Update config with model parameters from artifact
-        config['model']['params'].update(model_config.get('model_params', {}))
-
         # Initialize the model using the factory
         model = get_model(
             model_type=config['model']['type'],
             **config['model']['params']
         )
-        model.load_state_dict(torch.load(model_path, map_location=config['device'], weights_only=True))
         model = model.to(config['device'])
 
         # Watch the model with W&B
@@ -177,7 +162,8 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
 
-    for images, labels in tqdm(train_loader, desc='Training', leave=False, unit='batch'):
+    for batch_idx, (images, labels) in enumerate(tqdm(train_loader, desc='Training', leave=False, unit='batch')):
+
         images = images.to(device, non_blocking=True)
         labels = labels.to(device).unsqueeze(1).float()
 
@@ -239,3 +225,4 @@ def validate(model, val_loader, criterion, metrics, device):
         metric.reset()
 
     return avg_val_loss, metric_scores
+

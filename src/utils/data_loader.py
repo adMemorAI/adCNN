@@ -16,19 +16,11 @@ def get_data_loaders(config):
         config (dict): Configuration dictionary.
 
     Returns:
-        tuple: (train_loader, val_loader, class_weights)
+        tuple: (train_loader, test_loader, class_weights)
     """
     # Initialize datasets with internal splits and transforms
-    train_dataset = get_dataset(
-        dataset_type=config['datasets']['type'],
-        split='train',
-        transform=config['transform']
-    )
-    test_dataset = get_dataset(
-        dataset_type=config['datasets']['type'],
-        split='test',
-        transform=config['transform']
-    )
+    train_dataset = get_dataset(config, split='train')
+    test_dataset = get_dataset(config, split='test') 
 
     # Compute class weights based on training labels
     train_labels = np.array(train_dataset.binary_labels)
@@ -76,3 +68,4 @@ def create_weighted_sampler(class_weights, labels):
         replacement=True
     )
     return sampler
+

@@ -1,29 +1,69 @@
+# sweep_config.yaml
+
 program: src/main.py
 method: bayes
 metric:
-  name: Validation F1-Score
-  goal: maximize
+  name: "Validation F1-Score"
+  goal: "maximize"
 parameters:
-  learning_rate:
-    distribution: uniform
-    min: 0.0001
-    max: 0.01
+  # Train Parameters
   batch_size:
     values: [32, 64, 128]
+  learning_rate:
+    distribution: "uniform"
+    min: 0.0001
+    max: 0.01
   optimizer:
     values: ["Adam", "SGD"]
   focal_gamma:
     values: [1.0, 2.0, 3.0]
+  num_epochs:
+    values: [10, 20, 30]
+  scheduler_factor:
+    distribution: "uniform"
+    min: 0.05
+    max: 0.2
+  scheduler_patience:
+    values: [2, 3, 4]
+  early_stopping_patience:
+    values: [3, 5, 7]
+
+  # Model Parameters
+  model_type:
+    values: ["ResAD"] # "ResAD", "CvT",
   dropout:
-    distribution: uniform
+    distribution: "uniform"
     min: 0.3
     max: 0.7
-  model_type:
-    values: ["ResAD", ]
+  image_size:
+    values: [256,]
+  dim:
+    values: [64, 128]
+  depth:
+    values: ["1,2,10", "2,4,12"]    # Will be parsed into lists
+  heads:
+    values: ["1,3,6", "2,4,8"]      # Will be parsed into lists
+  scale_dim:
+    values: [4, 8]
+  pool:
+    values: ["cls", "mean"]
+
+  # Dataset Parameters
   dataset_type:
-    values: ["OASISKaggle", ]  
+    values: ["OASISKaggle", "adni"]  
+
+  horizontal_flip:
+    distribution: "uniform"
+    min: 0.3
+    max: 0.7
+  rotation:
+    distribution: "uniform"
+    min: 5
+    max: 30
+
 command:
   - python
   - src/main.py
   - --step
-  - full
+  - train
+

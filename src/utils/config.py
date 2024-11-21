@@ -1,9 +1,41 @@
-import inspect
+# utils/config.py
+
 import yaml
 import os
+from pathlib import Path
 import wandb
 from torchvision import transforms
-from pathlib import Path
+import warnings
+
+# Define the mapping dictionary
+PARAM_MAPPING = {
+    # Train Parameters
+    'batch_size': 'train_params.batch_size',
+    'learning_rate': 'train_params.learning_rate',
+    'optimizer': 'train_params.optimizer',
+    'focal_gamma': 'train_params.focal_gamma',
+    'num_epochs': 'train_params.num_epochs',
+    'scheduler_factor': 'train_params.scheduler_factor',
+    'scheduler_patience': 'train_params.scheduler_patience',
+    'early_stopping_patience': 'train_params.early_stopping_patience',
+    
+    # Model Parameters
+    'model_type': 'model.type',
+    'dropout': 'model.params.dropout_p',
+    'image_size': 'model.params.image_size',
+    'dim': 'model.params.dim',
+    'depth': 'model.params.depth',
+    'heads': 'model.params.heads',
+    'scale_dim': 'model.params.scale_dim',
+    'pool': 'model.params.pool',
+    
+    # Dataset Parameters
+    'dataset_type': 'datasets.type',
+    
+    # (Optional) Transform Parameters
+    'horizontal_flip': 'transform.horizontal_flip',
+    'rotation': 'transform.rotation',
+}
 
 def load_config(config_path="config.yaml"):
     """
@@ -23,19 +55,19 @@ def load_config(config_path="config.yaml"):
 
     # Override with W&B config if present
     if wandb.run and wandb.run.config:
-        wandb_config = dict(wandb.run.config)  # Correctly convert to a dict
+        wandb_config = dict(wandb.run.config)  # Convert to a dict
         config = merge_configs(config, wandb_config)
 
-    config['project_root'] = Path(__file__).parent.parent.parent
+    config['project_root'] = Path(__file__).resolve().parent.parent.parent
 
-    # Build the transform based on config
-    config['transform'] = build_transform(config.get('transform', {}))
+    tr = build_transform(config.get('transform', {}))
+    config['transform'] = tr
 
     return config
 
 def merge_configs(default_config, sweep_config):
     """
-    Merge sweep configuration into the default configuration.
+    Merge sweep configuration into the default configuration based on PARAM_MAPPING.
 
     Args:
         default_config (dict): Default configuration dictionary.
@@ -45,25 +77,59 @@ def merge_configs(default_config, sweep_config):
         dict: Merged configuration dictionary.
     """
     for key, value in sweep_config.items():
-        if key in default_config:
-            if isinstance(value, dict) and isinstance(default_config[key], dict):
-                default_config[key] = merge_configs(default_config[key], value)
-            else:
-                default_config[key] = value
+        if key in PARAM_MAPPING:
+            path = PARAM_MAPPING[key]
+            set_nested_config(default_config, path, value)
         else:
             default_config[key] = value
     return default_config
+
+def set_nested_config(config, path, value):
+    """
+    Set a value in the nested configuration dictionary based on the provided path.
+
+    Args:
+        config (dict): The configuration dictionary to modify.
+        path (str): Dot-separated path indicating where to set the value.
+        value: The value to set.
+    """
+    keys = path.split('.')
+    d = config
+    for key in keys[:-1]:
+        if key not in d or not isinstance(d[key], dict):
+            d[key] = {}
+        d = d[key]
+    final_key = keys[-1]
+    # Handle comma-separated strings for lists
+    if isinstance(d.get(final_key, None), list) and isinstance(value, str):
+        try:
+            value = parse_list(value)
+        except ValueError as e:
+            pass
+    d[final_key] = value
+
+def parse_list(param):
+    """Parses a comma-separated string into a list of integers or strings."""
+    if isinstance(param, str):
+        # Attempt to parse integers, fall back to strings if not possible
+        try:
+            return [int(x.strip()) for x in param.split(',')]
+        except ValueError:
+            return [x.strip() for x in param.split(',')]
+    return param
 
 def build_transform(transform_config):
     """
     Build a torchvision.transforms.Compose object based on the transform configuration.
 
     Args:
-        transform_config (dict): Dictionary containing transform parameters.
+        transform_config (dict or torchvision.transforms.Compose): 
+            Dictionary containing transform parameters or an already composed transform.
 
     Returns:
         torchvision.transforms.Compose: The composed transform.
     """
+
     transform_list = []
 
     if 'resize' in transform_config:
@@ -83,7 +149,10 @@ def build_transform(transform_config):
 
     if 'rotation' in transform_config:
         degrees = transform_config['rotation']
-        transform_list.append(transforms.RandomRotation(degrees))
+        # Convert to tuple for symmetric rotation
+        if isinstance(degrees, (int, float)):
+            degrees = (-degrees, degrees)
+        transform_list.append(transforms.RandomRotation(degrees, expand=False, fill=0))
 
     if 'color_jitter' in transform_config:
         cj_params = transform_config['color_jitter']
@@ -101,47 +170,7 @@ def build_transform(transform_config):
         std = transform_config['normalize'].get('std', [1.0])
         transform_list.append(transforms.Normalize(mean=mean, std=std))
 
-    return transforms.Compose(transform_list)
+    tr = transforms.Compose(transform_list)
 
-def filter_kwargs(target_class, kwargs):
-    """
-    Filters the kwargs to include only those accepted by the target_class's __init__ method.
+    return tr
 
-    Args:
-        target_class (type): The class to instantiate.
-        kwargs (dict): The keyword arguments to filter.
-
-    Returns:
-        dict: Filtered keyword arguments.
-    """
-    sig = inspect.signature(target_class.__init__)
-    # Exclude 'self'
-    params = sig.parameters
-    valid_params = set(params.keys()) - {'self'}
-
-    filtered_kwargs = {}
-    missing_params = []
-
-    for name, param in params.items():
-        if name == 'self':
-            continue
-        if name in kwargs:
-            filtered_kwargs[name] = kwargs[name]
-        elif param.default == inspect.Parameter.empty:
-            missing_params.append(name)
-
-    extra_kwargs = set(kwargs.keys()) - valid_params
-
-    if missing_params:
-        warnings.warn(
-            f"Missing required arguments for {target_class.__name__}: {missing_params}. Using default values if available.",
-            UserWarning
-        )
-
-    if extra_kwargs:
-        warnings.warn(
-            f"Received unexpected keyword arguments for {target_class.__name__}: {extra_kwargs}. These will be ignored.",
-            UserWarning
-        )
-
-    return filtered_kwargs

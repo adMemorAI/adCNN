@@ -30,8 +30,12 @@ def initialize_model(config):
         )
         model = model.to(config['device'])
 
-        # Define the artifact
+        # Define the artifact with metadata
         artifact = wandb.Artifact('initialized_model', type='model')
+        artifact.metadata = {
+            'model_type': config['model']['type'],
+            'model_params': config['model']['params']
+        }
 
         # Ensure the model directory exists
         os.makedirs(config['model_dir'], exist_ok=True)
@@ -55,3 +59,4 @@ def initialize_model(config):
         # Finish the W&B run if it was started here
         if should_finish:
             wandb.finish()
+
