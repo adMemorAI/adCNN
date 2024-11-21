@@ -28,15 +28,13 @@ This project aims to build a robust neural network system to classify whether a 
 
 1. **Clone the Repository**
 
-   `git clone https://github.com/yourusername/alzheimer-recognition.git`
+   `git clone https://github.com/adMemorAI/adCNN.git`
 
-   `cd alzheimer-recognition`
+   `cd adCNN`
 
 2. **Create a Virtual Environment**
 
-   `python3 -m venv venv`
-
-   `source venv/bin/activate`  (On Windows: `venv\Scripts\activate`)
+   `conda env create -f requirements.txt`
 
 3. **Install Dependencies**
 
