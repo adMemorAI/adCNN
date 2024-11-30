@@ -30,7 +30,7 @@ parameters:
 
   # Model Parameters
   model_type:
-    values: ["ResAD"] # "ResAD", "CvT",
+    values: ["ResAD", ] # "CvT"
   dropout:
     distribution: "uniform"
     min: 0.3
@@ -50,8 +50,9 @@ parameters:
 
   # Dataset Parameters
   dataset_type:
-    values: ["OASISKaggle", "adni"]  
+    values: ["OASISKaggle", ] # "ADNI"
 
+  # Transform Parameters
   horizontal_flip:
     distribution: "uniform"
     min: 0.3

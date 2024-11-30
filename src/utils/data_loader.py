@@ -26,8 +26,9 @@ def get_data_loaders(config):
     train_labels = np.array(train_dataset.binary_labels)
     class_weights = compute_class_weights(train_labels, config['device'])
 
-    # Log class weights to W&B
-    wandb.log({"Class Weights": class_weights.tolist()})
+    # Log class weights to W&B if required
+    if wandb.run is not None:
+        wandb.log({"Class Weights": class_weights.tolist()})
 
     # Create weighted sampler for the training data loader
     sampler = create_weighted_sampler(class_weights, train_labels)

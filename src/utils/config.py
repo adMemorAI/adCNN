@@ -6,9 +6,22 @@ from pathlib import Path
 import wandb
 from torchvision import transforms
 import warnings
+from utils.skull_strip import SkullStrip
 
 # Define the mapping dictionary
+# utils/config.py
+
 PARAM_MAPPING = {
+    # Model Parameters
+    'model_type': 'model_type', 
+    'dropout': 'model_params.params.dropout_p',
+    'image_size': 'model_params.params.image_size',
+    'dim': 'model_params.params.dim',
+    'depth': 'model_params.params.depth',
+    'heads': 'model_params.params.heads',
+    'scale_dim': 'model_params.params.scale_dim',
+    'pool': 'model_params.params.pool',
+    
     # Train Parameters
     'batch_size': 'train_params.batch_size',
     'learning_rate': 'train_params.learning_rate',
@@ -19,20 +32,10 @@ PARAM_MAPPING = {
     'scheduler_patience': 'train_params.scheduler_patience',
     'early_stopping_patience': 'train_params.early_stopping_patience',
     
-    # Model Parameters
-    'model_type': 'model.type',
-    'dropout': 'model.params.dropout_p',
-    'image_size': 'model.params.image_size',
-    'dim': 'model.params.dim',
-    'depth': 'model.params.depth',
-    'heads': 'model.params.heads',
-    'scale_dim': 'model.params.scale_dim',
-    'pool': 'model.params.pool',
-    
     # Dataset Parameters
     'dataset_type': 'datasets.type',
     
-    # (Optional) Transform Parameters
+    # Transform Parameters
     'horizontal_flip': 'transform.horizontal_flip',
     'rotation': 'transform.rotation',
 }
@@ -40,12 +43,6 @@ PARAM_MAPPING = {
 def load_config(config_path="config.yaml"):
     """
     Load configuration from a YAML file and merge with W&B config if available.
-
-    Args:
-        config_path (str): Path to the configuration file.
-
-    Returns:
-        dict: Merged configuration dictionary.
     """
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -57,6 +54,20 @@ def load_config(config_path="config.yaml"):
     if wandb.run and wandb.run.config:
         wandb_config = dict(wandb.run.config)  # Convert to a dict
         config = merge_configs(config, wandb_config)
+
+    # Determine the selected model name
+    model_type = config.get('model_type')
+    if not model_type:
+        raise ValueError("No model_type specified in config or W&B sweep.")
+
+    # Extract model configuration
+    if 'models' not in config or model_type not in config['models']:
+        raise ValueError(f"Model '{model_type}' not found in configuration.")
+    model_config = config['models'][model_type]
+
+    # Merge model and train parameters into top-level config
+    config['model_params'] = model_config['model_params']
+    config['train_params'] = model_config['train_params']
 
     config['project_root'] = Path(__file__).resolve().parent.parent.parent
 
@@ -142,6 +153,9 @@ def build_transform(transform_config):
     if 'grayscale' in transform_config:
         num_output_channels = transform_config['grayscale']
         transform_list.append(transforms.Grayscale(num_output_channels=num_output_channels))
+
+    if 'skull_strip' in transform_config and transform_config['skull_strip']:
+        transform_list.append(SkullStrip())
 
     if 'horizontal_flip' in transform_config:
         p = transform_config['horizontal_flip']

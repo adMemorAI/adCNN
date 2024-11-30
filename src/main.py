@@ -10,10 +10,10 @@ from train_model import train_model
 from evaluate_model import evaluate_model
 
 def main():
-    parser = argparse.ArgumentParser(description="Modular ML Pipeline with W&B Integration")
+    parser = argparse.ArgumentParser(description="ML Pipeline")
 
     # Required argument
-    parser.add_argument('--step', type=str, required=True, choices=['train', 'evaluate'],
+    parser.add_argument('--step', type=str, required=True, choices=['train', 'evaluate', 'visualize'],
                         help="Pipeline step to execute: train, evaluate")
 
     args = parser.parse_args()

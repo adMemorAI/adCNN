@@ -26,7 +26,7 @@ def train_model(config):
     # Check if a W&B run is already active
     if wandb.run is None:
         # Initialize W&B run if not already active
-        wandb.init(project=config.get('wandb_project', 'adCNN'), job_type="train", config=config)
+        wandb.init(project=config.get('wandb_project', 'adCNN-src'), job_type="train", config=config)
         run = wandb.run
         should_finish = True
     else:
@@ -37,8 +37,8 @@ def train_model(config):
     try:
         # Initialize the model using the factory
         model = get_model(
-            model_type=config['model']['type'],
-            **config['model']['params']
+            model_type=config['model_params']['type'],
+            **config['model_params']['params']
         )
         model = model.to(config['device'])
 
