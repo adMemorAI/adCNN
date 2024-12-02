@@ -3,7 +3,7 @@
 wandb_project: "adCNN-src"
 project_root: "."
 
-device: "cuda"
+device: "cpu"
 num_workers: 4
 pin_memory: true
 model_dir: "./models"

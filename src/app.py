@@ -1,30 +1,24 @@
-# src/app.py
-
 import gradio as gr
-import torch
+import numpy as np
+import nibabel as nib
 from PIL import Image
 import os
-import warnings
-
-from utils.config import load_config
-from models.ResAD import ResAD  # Ensure this path is correct based on your project structure
-
-import nibabel as nib
-import numpy as np
+import torch
 from torchvision import transforms
+import warnings
 
 # Suppress any unnecessary warnings
 warnings.filterwarnings("ignore")
 
 # ---------------------------
-# 1. Load Configuration
+# 1. Load Configuration and Model
 # ---------------------------
 
+from utils.config import load_config
+from models.ResAD import ResAD  # Ensure this path is correct based on your project structure
+
+# Load configuration
 config = load_config("config.yaml")
-
-# ---------------------------
-# 2. Load the Pretrained Model
-# ---------------------------
 
 def load_trained_model(config):
     """
@@ -60,14 +54,11 @@ def load_trained_model(config):
 
 model = load_trained_model(config)
 
-# ---------------------------
-# 3. Define Transformation Pipeline
-# ---------------------------
-
-transform = config['transform']  # Utilizing the transform built in config.py
+# Define transformation pipeline
+transform_pipeline = config['transform']  # Already a Compose object
 
 # ---------------------------
-# 4. Define Utility Functions
+# 2. Utility Functions
 # ---------------------------
 
 def load_nifti(nifti_path):
@@ -110,7 +101,12 @@ def get_slice(volume, slice_idx, axis=0):
 
     slice_img = slice_img.astype(np.float32)
     # Normalize to [0, 255] for visualization
-    slice_img = (slice_img - np.min(slice_img)) / (np.max(slice_img) - np.min(slice_img) + 1e-8)
+    slice_min = slice_img.min()
+    slice_max = slice_img.max()
+    if slice_max - slice_min != 0:
+        slice_img = (slice_img - slice_min) / (slice_max - slice_min)
+    else:
+        slice_img = np.zeros_like(slice_img)
     slice_img = (slice_img * 255).astype(np.uint8)
     img = Image.fromarray(slice_img)
     return img
@@ -129,7 +125,7 @@ def classify_slice(img):
         return "No image selected.", "0.00%"
 
     # Apply transformations
-    img_tensor = transform(img).unsqueeze(0).to(config.get('device', 'cpu'))  # Add batch dimension and move to device
+    img_tensor = transform_pipeline(img).unsqueeze(0).to(config.get('device', 'cpu'))  # Add batch dimension and move to device
 
     with torch.no_grad():
         output = model(img_tensor)
@@ -139,126 +135,181 @@ def classify_slice(img):
     return label, f"{probability * 100:.2f}%"
 
 # ---------------------------
-# 5. Build Gradio Interface
+# 3. Gradio Interface Functions
 # ---------------------------
 
-def visualize_and_classify(nifti_file, slice_idx, axis):
+def process_nifti(file_path):
     """
-    Load NIfTI file, extract the specified slice, and classify it.
+    Processes the uploaded NIfTI file and prepares data for slice viewing.
 
-    Args:
-        nifti_file (gr.File): Uploaded NIfTI file.
-        slice_idx (int): Index of the slice to visualize.
-        axis (str): Axis along which to slice ('axial', 'coronal', 'sagittal').
+    Parameters:
+        file_path (str): Path to the uploaded NIfTI file.
 
     Returns:
-        PIL.Image: The extracted slice image.
-        str: Classification label.
-        str: Probability score.
+        Tuple containing the number of slices and the volume data.
     """
-    if nifti_file is None:
-        return None, "No file uploaded.", "0.00%"
+    try:
+        # Validate file extension
+        if file_path.endswith('.nii'):
+            pass  # Valid .nii file
+        elif file_path.endswith('.nii.gz'):
+            pass  # Valid .nii.gz file
+        else:
+            raise ValueError("Unsupported file extension. Please upload a '.nii' or '.nii.gz' file.")
 
-    volume = load_nifti(nifti_file.name)
+        # Load the NIfTI file
+        vol = nib.load(file_path).get_fdata()
+        volume = vol.T  # Transpose if necessary based on your data orientation
+        nb_frames = volume.shape[0]
 
-    axis_mapping = {'axial': 0, 'coronal': 1, 'sagittal': 2}
-    if axis not in axis_mapping:
-        return None, "Invalid axis selected.", "0.00%"
+        return nb_frames, volume
 
-    axis_num = axis_mapping[axis]
-    num_slices = volume.shape[axis_num]
+    except Exception as e:
+        # In case of any error, return None and the error message
+        return None, f"Error processing NIfTI file: {str(e)}"
 
-    slice_idx = int(slice_idx)
-    slice_idx = min(max(slice_idx, 0), num_slices - 1)  # Clamp index
+def on_file_upload(file_path):
+    """
+    Callback function when a file is uploaded.
 
-    img = get_slice(volume, slice_idx, axis=axis_num)
-    label, prob = classify_slice(img)
+    Parameters:
+        file_path (str): Path to the uploaded NIfTI file.
 
-    return img, label, prob
+    Returns:
+        Tuple containing updates for the image, slider, status, number of slices, and volume data.
+    """
+    if file_path is None:
+        return (
+            gr.update(value=None),
+            gr.update(maximum=1, value=0, interactive=False),
+            "No file uploaded.",
+            None,
+            None
+        )
+    nb_frames, volume_or_error = process_nifti(file_path)
+    if nb_frames is None:
+        # An error occurred during processing
+        return (
+            gr.update(value=None),
+            gr.update(maximum=1, value=0, interactive=False),
+            volume_or_error,  # volume_or_error contains the error message
+            None,
+            None
+        )
+    # Successfully processed the file
+    initial_image = get_slice(volume_or_error, 0, axis=0)
+    label, prob = classify_slice(initial_image)
+    return (
+        initial_image,  # Initial image
+        gr.update(maximum=nb_frames - 1, value=0, interactive=True),
+        f"File uploaded successfully! Prediction: {label} ({prob})",
+        nb_frames,
+        volume_or_error
+    )
+
+def update_slice(slice_index, nb_frames, volume):
+    """
+    Updates the displayed slice based on the slider index and classifies it.
+
+    Parameters:
+        slice_index (int): Current slice index from the slider.
+        nb_frames (int): Total number of slices.
+        volume (np.ndarray): The 3D volume data.
+
+    Returns:
+        Tuple containing the new image and the status message with prediction.
+    """
+    if nb_frames is None or volume is None:
+        return "Please upload a valid NIfTI file.", gr.update(value=None), gr.update(value=None)
+    try:
+        slice_index = int(np.clip(slice_index, 0, nb_frames - 1))
+        image = get_slice(volume, slice_index, axis=0)
+        label, prob = classify_slice(image)
+        return image, f"Prediction: {label} ({prob})", label, prob
+    except Exception as e:
+        return f"Error displaying slice: {str(e)}", gr.update(value=None), gr.update(value=None)
 
 # ---------------------------
-# 6. Initialize Gradio App
+# 4. Build Gradio Interface
 # ---------------------------
 
 with gr.Blocks() as demo:
-    gr.Markdown("# Alzheimer's Disease Classification Demo")
+    gr.Markdown("# 🧠 Brain Slice Viewer with Alzheimer's Classification")
     gr.Markdown(
         """
-        Upload a NIfTI file, select the slicing axis, navigate through the brain slices using the slider, and classify each slice as having Alzheimer's Disease or not.
+        Upload a `.nii` or `.nii.gz` NIfTI file to visualize its 2D brain slices.
+        Use the slider below to navigate through different slices.
+        The model will classify each slice as having Alzheimer's Disease or not.
         """
     )
-    
+
     with gr.Row():
-        with gr.Column():
-            nifti_input = gr.File(label="Upload NIfTI File (.nii or .nii.gz)")
-            axis_dropdown = gr.Dropdown(
-                choices=["axial", "coronal", "sagittal"],
-                label="Slicing Axis",
-                value="axial",
-                interactive=True
+        with gr.Column(scale=1):
+            file_input = gr.File(
+                label="📁 Upload NIfTI File",
+                type="filepath",
+                file_types=[".nii", ".gz"]  # Allow '.nii' and '.gz' extensions
             )
-            slice_slider = gr.Slider(label="Slice Index", minimum=0, maximum=100, step=1, value=50, visible=False)
-            classify_button = gr.Button("Classify Slice", visible=False)
-        with gr.Column():
-            image_output = gr.Image(label="Selected Slice")
-            prediction_label = gr.Textbox(label="Prediction", interactive=False)
-            prediction_prob = gr.Textbox(label="Probability", interactive=False)
-    
-    # Hidden state to store the number of slices
-    num_slices_state = gr.State()
-    
-    # Function to update slider based on uploaded file and axis
-    def update_slider(nifti_file, axis):
-        if nifti_file is None:
-            return gr.Slider.update(visible=False), gr.Button.update(visible=False), None
-        volume = load_nifti(nifti_file.name)
-        axis_mapping = {'axial': 0, 'coronal': 1, 'sagittal': 2}
-        axis_num = axis_mapping.get(axis, 0)
-        num_slices = volume.shape[axis_num]
-        default_slice = num_slices // 2
-        # Update slider's maximum and visibility
-        slider_update = gr.Slider.update(maximum=num_slices - 1, value=default_slice, visible=True)
-        # Make classify button visible
-        classify_update = gr.Button.update(visible=True)
-        return slider_update, classify_update, num_slices
-    
-    # When a file is uploaded or axis is changed, update the slider
-    nifti_input.change(
-        fn=update_slider,
-        inputs=[nifti_input, axis_dropdown],
-        outputs=[slice_slider, classify_button, num_slices_state]
+            slice_slider = gr.Slider(
+                minimum=0,
+                maximum=1,  # Will be updated after file upload
+                step=1,
+                label="🖼 Slice Index",
+                value=0,
+                interactive=False  # Disabled until a file is uploaded
+            )
+            status = gr.Textbox(
+                label="ℹ️ Status",
+                value="Please upload a NIfTI file.",
+                interactive=False
+            )
+        with gr.Column(scale=2):
+            brain_image = gr.Image(
+                label="🖼 Brain Slice",
+                type="pil",
+                interactive=False
+            )
+            prediction_label = gr.Textbox(
+                label="🩺 Prediction",
+                value="N/A",
+                interactive=False
+            )
+            prediction_prob = gr.Textbox(
+                label="📊 Probability",
+                value="0.00%",
+                interactive=False
+            )
+
+    # Hidden state to store number of slices and volume data
+    state_nb_frames = gr.State()
+    state_volume = gr.State()
+
+    # File upload handler
+    file_input.upload(
+        fn=on_file_upload,
+        inputs=file_input,
+        outputs=[brain_image, slice_slider, status, state_nb_frames, state_volume]
     )
-    
-    axis_dropdown.change(
-        fn=update_slider,
-        inputs=[nifti_input, axis_dropdown],
-        outputs=[slice_slider, classify_button, num_slices_state]
-    )
-    
-    # Function to update the displayed image based on slider
-    def update_image(nifti_file, slice_idx, axis, num_slices):
-        if nifti_file is None:
-            return None
-        axis_mapping = {'axial': 0, 'coronal': 1, 'sagittal': 2}
-        axis_num = axis_mapping.get(axis, 0)
-        slice_idx = int(slice_idx)
-        slice_idx = min(max(slice_idx, 0), num_slices - 1)
-        img = get_slice(load_nifti(nifti_file.name), slice_idx, axis=axis_num)
-        return img
-    
-    # When the slider value changes, update the image
+
+    # Slider change handler
     slice_slider.change(
-        fn=update_image,
-        inputs=[nifti_input, slice_slider, axis_dropdown, num_slices_state],
-        outputs=image_output
+        fn=update_slice,
+        inputs=[slice_slider, state_nb_frames, state_volume],
+        outputs=[brain_image, status, prediction_label, prediction_prob]
     )
-    
-    # When the classify button is clicked, classify the current slice
-    classify_button.click(
-        fn=classify_slice,
-        inputs=image_output,
-        outputs=[prediction_label, prediction_prob]
+
+    # Initial load setup
+    demo.load(
+        lambda: (
+            gr.update(value=None),
+            gr.update(maximum=1, value=0, interactive=False),
+            "Please upload a NIfTI file.",
+            None,
+            None
+        ),
+        outputs=[brain_image, slice_slider, status, state_nb_frames, state_volume]
     )
-    
-    demo.launch()
+
+# Launch the Gradio app
+demo.launch()
 
