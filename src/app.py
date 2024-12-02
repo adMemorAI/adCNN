@@ -130,7 +130,7 @@ def classify_slice(img):
     with torch.no_grad():
         output = model(img_tensor)
         probability = torch.sigmoid(output).item()
-        label = "Alzheimer" if probability >= 0.5 else "No Alzheimer"
+        label = "Alzheimer"
 
     return label, f"{probability * 100:.2f}%"
 
